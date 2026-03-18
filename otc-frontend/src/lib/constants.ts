@@ -84,9 +84,14 @@ export function formatRawAmount(rawAmount: string, mint: string): string {
 
 export function timeAgo(dateStr: string): string {
   const now = Date.now();
-  const then = new Date(dateStr).getTime();
+  // SQLite dates lack timezone — treat as UTC by appending Z if needed
+  const normalized = dateStr.endsWith('Z') || dateStr.includes('+') || dateStr.includes('T')
+    ? dateStr
+    : dateStr.replace(' ', 'T') + 'Z';
+  const then = new Date(normalized).getTime();
   const diff = now - then;
 
+  if (isNaN(diff) || diff < 0) return 'just now';
   if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
