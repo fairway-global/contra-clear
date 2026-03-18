@@ -49,7 +49,7 @@ app.post('/:id/quote', async (c) => {
   return c.json(quote);
 });
 
-// Accept a quote — initiates the trade
+// Accept a quote — creates trade and returns channel transfer transactions to sign
 app.post('/:id/accept', async (c) => {
   const rfqId = c.req.param('id');
   const { quoteId } = await c.req.json();
@@ -58,7 +58,7 @@ app.post('/:id/accept', async (c) => {
   try {
     const trade = await initiateTrade(rfqId, quoteId);
 
-    // Build both leg transactions for the frontend to sign
+    // Build both leg transactions — real SPL token transfers on the Contra channel
     const [legATx, legBTx] = await Promise.all([
       buildLegATransaction(trade),
       buildLegBTransaction(trade),
@@ -66,9 +66,10 @@ app.post('/:id/accept', async (c) => {
 
     return c.json({
       trade,
+      settled: false,
       transactions: {
-        legA: { transaction: legATx, signer: trade.partyA, description: `Send ${trade.sellAmount} of sell token` },
-        legB: { transaction: legBTx, signer: trade.partyB, description: `Send ${trade.buyAmount} of buy token` },
+        legA: { transaction: legATx, signer: trade.partyA, description: `Send ${trade.sellAmount} of sell token to counterparty` },
+        legB: { transaction: legBTx, signer: trade.partyB, description: `Send ${trade.buyAmount} of buy token to counterparty` },
       },
     });
   } catch (err: any) {

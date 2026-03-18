@@ -146,7 +146,14 @@ export const submitQuote = (rfqId: string, quoter: string, price: string, amount
   post<Quote>(`${API_BASE}/rfq/${rfqId}/quote`, { quoter, price, amount });
 
 export const acceptQuote = (rfqId: string, quoteId: string) =>
-  post<{ trade: Trade; transactions: { legA: { transaction: string; signer: string }; legB: { transaction: string; signer: string } } }>(`${API_BASE}/rfq/${rfqId}/accept`, { quoteId });
+  post<{
+    trade: Trade;
+    settled: boolean;
+    transactions?: {
+      legA: { transaction: string; signer: string; description: string };
+      legB: { transaction: string; signer: string; description: string };
+    };
+  }>(`${API_BASE}/rfq/${rfqId}/accept`, { quoteId });
 
 export const submitTradeLeg = (rfqId: string, tradeId: string, leg: 'A' | 'B', signedTransaction: string) =>
   post<Trade>(`${API_BASE}/rfq/${rfqId}/trade/${tradeId}/submit`, { leg, signedTransaction });

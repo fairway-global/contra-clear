@@ -172,7 +172,7 @@ export function createRFQ(creator: string, sellToken: string, sellAmount: string
 }
 
 export function getActiveRFQs(): RFQ[] {
-  return getDb().prepare("SELECT * FROM rfqs WHERE status = 'active' AND expires_at > datetime('now') ORDER BY created_at DESC").all().map(mapRFQ);
+  return getDb().prepare("SELECT * FROM rfqs WHERE status IN ('active', 'quoted') AND expires_at > datetime('now') ORDER BY created_at DESC").all().map(mapRFQ);
 }
 
 export function getRFQ(id: string): RFQ | null {
