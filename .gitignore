@@ -68,6 +68,14 @@ coverage-*.lcov
 **/escrow-generated/
 **/withdraw-generated/
 
+# SQLite databases
+*.db
+*.db-wal
+*.db-shm
+
+# Temp scripts
+**/create-escrow-instance.mjs
+
 # Python cache
 **/__pycache__/
 
