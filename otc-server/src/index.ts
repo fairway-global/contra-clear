@@ -3,7 +3,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-
+import authRouter from './routes/auth.js';
 import clientsRouter from './routes/clients.js';
 import depositsRouter from './routes/deposits.js';
 import balancesRouter from './routes/balances.js';
@@ -13,12 +13,39 @@ import withdrawalsRouter from './routes/withdrawals.js';
 
 import { getDb } from './db/store.js';
 import { getSlot, GATEWAY_URL, VALIDATOR_URL } from './services/contra.js';
+import { getSessionWallet } from './services/auth.js';
+import { startWebSocketServer, broadcast } from './services/ws.js';
 
 const app = new Hono();
 
 // Middleware
 app.use('*', cors());
 app.use('*', logger());
+
+// Auth middleware: protect mutation endpoints
+// GET requests and /api/auth/* are public
+app.use('/api/*', async (c, next) => {
+  // Public endpoints — no auth required
+  const path = c.req.path;
+  if (path.startsWith('/api/auth/')) return next();
+  if (c.req.method === 'GET') return next();
+
+  // Check Authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return c.json({ error: 'Authentication required. Please connect your wallet.' }, 401);
+  }
+
+  const token = authHeader.slice(7);
+  const wallet = getSessionWallet(token);
+  if (!wallet) {
+    return c.json({ error: 'Session expired. Please reconnect your wallet.' }, 401);
+  }
+
+  // Attach wallet to request headers for downstream use
+  c.req.raw.headers.set('x-wallet', wallet);
+  return next();
+});
 
 // Health check
 app.get('/health', async (c) => {
@@ -31,6 +58,7 @@ app.get('/health', async (c) => {
 });
 
 // API routes
+app.route('/api/auth', authRouter);
 app.route('/api/clients', clientsRouter);
 app.route('/api/deposit', depositsRouter);
 app.route('/api/balances', balancesRouter);
@@ -38,12 +66,25 @@ app.route('/api/rfq', rfqRouter);
 app.route('/api/trades', tradesRouter);
 app.route('/api/withdraw', withdrawalsRouter);
 
-// Admin: overview of all system state
+// Token decimals for admin display
+const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
+const TOKEN_META: Record<string, { symbol: string; decimals: number }> = {};
+if (DEMO_MINTS[0]) TOKEN_META[DEMO_MINTS[0]] = { symbol: 'USDC', decimals: 6 };
+if (DEMO_MINTS[1]) TOKEN_META[DEMO_MINTS[1]] = { symbol: 'wSOL', decimals: 9 };
+
+function formatRaw(amount: string, mint: string): string {
+  const meta = TOKEN_META[mint];
+  if (!meta) return amount;
+  const human = parseFloat(amount) / Math.pow(10, meta.decimals);
+  return `${human.toFixed(meta.decimals > 6 ? 4 : 2)} ${meta.symbol}`;
+}
+
+// Admin endpoints
 app.get('/api/admin/overview', async (c) => {
   const db = getDb();
   const clients = db.prepare('SELECT COUNT(*) as count FROM clients').get() as any;
   const deposits = db.prepare('SELECT COUNT(*) as count FROM deposits').get() as any;
-  const activeRFQs = db.prepare("SELECT COUNT(*) as count FROM rfqs WHERE status = 'active'").get() as any;
+  const activeRFQs = db.prepare("SELECT COUNT(*) as count FROM rfqs WHERE status IN ('active','quoted')").get() as any;
   const completedTrades = db.prepare("SELECT COUNT(*) as count FROM trades WHERE status = 'completed'").get() as any;
   const totalTrades = db.prepare('SELECT COUNT(*) as count FROM trades').get() as any;
   const withdrawals = db.prepare('SELECT COUNT(*) as count FROM withdrawals').get() as any;
@@ -62,43 +103,54 @@ app.get('/api/admin/overview', async (c) => {
   });
 });
 
-// Admin: all clients with balances
 app.get('/api/admin/clients', (c) => {
-  const db = getDb();
-  return c.json(db.prepare('SELECT * FROM clients ORDER BY created_at DESC').all());
+  return c.json(getDb().prepare('SELECT * FROM clients ORDER BY created_at DESC').all());
 });
 
-// Admin: all trades
 app.get('/api/admin/trades', (c) => {
-  const db = getDb();
-  return c.json(db.prepare('SELECT * FROM trades ORDER BY created_at DESC LIMIT 100').all());
+  const rows = getDb().prepare('SELECT * FROM trades ORDER BY created_at DESC LIMIT 100').all() as any[];
+  return c.json(rows.map(r => ({
+    ...r,
+    sell_display: formatRaw(r.sell_amount, r.sell_token),
+    buy_display: formatRaw(r.buy_amount, r.buy_token),
+  })));
 });
 
-// Admin: all deposits
 app.get('/api/admin/deposits', (c) => {
-  const db = getDb();
-  return c.json(db.prepare('SELECT * FROM deposits ORDER BY created_at DESC LIMIT 100').all());
+  const rows = getDb().prepare('SELECT * FROM deposits ORDER BY created_at DESC LIMIT 100').all() as any[];
+  return c.json(rows.map(r => ({
+    ...r,
+    amount_display: formatRaw(r.amount, r.token_mint),
+  })));
 });
 
-// Admin: all withdrawals
 app.get('/api/admin/withdrawals', (c) => {
-  const db = getDb();
-  return c.json(db.prepare('SELECT * FROM withdrawals ORDER BY created_at DESC LIMIT 100').all());
+  const rows = getDb().prepare('SELECT * FROM withdrawals ORDER BY created_at DESC LIMIT 100').all() as any[];
+  return c.json(rows.map(r => ({
+    ...r,
+    amount_display: formatRaw(r.amount, r.token_mint),
+  })));
 });
 
 // Initialize database
 getDb();
 
 const PORT = parseInt(process.env.OTC_PORT || '3001');
+const WS_PORT = parseInt(process.env.WS_PORT || '3002');
 
 console.log(`
   ╔══════════════════════════════════════════╗
   ║       Contra OTC Trading Desk           ║
   ║                                          ║
   ║  API Server: http://localhost:${PORT}       ║
+  ║  WebSocket:  ws://localhost:${WS_PORT}         ║
   ║  Gateway:    ${GATEWAY_URL}    ║
   ║  Validator:  ${VALIDATOR_URL} ║
   ╚══════════════════════════════════════════╝
 `);
 
 serve({ fetch: app.fetch, port: PORT });
+startWebSocketServer(WS_PORT);
+
+// Export broadcast for use in route handlers
+export { broadcast };

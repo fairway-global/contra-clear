@@ -3,6 +3,7 @@ import { PublicKey } from '@solana/web3.js';
 import * as store from '../db/store.js';
 import { getChannelBalance } from '../services/contra.js';
 import { initiateTrade, submitTradeLeg } from '../services/swap.js';
+import { broadcast } from '../services/ws.js';
 
 // Token decimals lookup
 const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
@@ -70,6 +71,7 @@ app.post('/create', async (c) => {
   }
 
   const rfq = store.createRFQ(creator, sellToken, sellAmount, buyToken, side || 'sell');
+  broadcast({ type: 'rfq_created', data: rfq });
   return c.json(rfq);
 });
 
@@ -132,6 +134,7 @@ app.post('/:id/quote', async (c) => {
 
   const quote = store.createQuote(rfqId, quoter, price, amount, buyAmount);
   store.updateRFQStatus(rfqId, 'quoted');
+  broadcast({ type: 'quote_submitted', data: { ...quote, rfqId } });
   return c.json(quote);
 });
 
@@ -169,8 +172,10 @@ app.post('/:id/accept', async (c) => {
     });
     store.updateRFQStatus(rfqId, 'filled');
 
+    const settledTrade = store.getTrade(trade.id);
+    broadcast({ type: 'trade_completed', data: settledTrade });
     return c.json({
-      trade: store.getTrade(trade.id),
+      trade: settledTrade,
       settled: true,
     });
   } catch (err: any) {
@@ -208,6 +213,7 @@ app.post('/:id/quote/:quoteId/reject', async (c) => {
   if (!quote) return c.json({ error: 'Quote not found' }, 404);
   if (quote.status !== 'pending') return c.json({ error: 'Quote is not pending' }, 400);
   store.updateQuoteStatus(quoteId, 'rejected');
+  broadcast({ type: 'quote_rejected', data: { quoteId, rfqId } });
   return c.json({ success: true });
 });
 

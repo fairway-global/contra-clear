@@ -93,8 +93,21 @@ export interface AdminOverview {
   contraSlot: number;
 }
 
+// Import auth token getter dynamically to avoid circular deps
+function getToken(): string | null {
+  try {
+    // Access the module-level variable from useAuth
+    const mod = (window as any).__authToken;
+    return mod || null;
+  } catch { return null; }
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const token = getToken();
+  const headers = new Headers(init?.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const res = await fetch(url, { ...init, headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;

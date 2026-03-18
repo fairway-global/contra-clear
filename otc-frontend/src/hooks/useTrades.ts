@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { getAllTrades, getWalletTrades, type Trade } from '../lib/api';
+import { useWSRefresh } from './useWebSocket';
 
 export function useTrades() {
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -19,9 +20,11 @@ export function useTrades() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 4000);
+    const interval = setInterval(refresh, 10000);
     return () => clearInterval(interval);
   }, [refresh]);
+
+  useWSRefresh(['trade_completed'], refresh);
 
   return { trades, loading, refresh };
 }
@@ -45,9 +48,11 @@ export function useWalletTrades() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 4000);
+    const interval = setInterval(refresh, 10000);
     return () => clearInterval(interval);
   }, [refresh]);
+
+  useWSRefresh(['trade_completed'], refresh);
 
   return { trades, loading, refresh };
 }

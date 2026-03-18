@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import toast from 'react-hot-toast';
-import { registerClient } from './lib/api';
 import type { RFQ } from './lib/api';
+import { useAuth } from './hooks/useAuth';
 
 import Header from './components/layout/Header';
 import WalletConnect from './components/wallet/WalletConnect';
@@ -21,19 +20,24 @@ export default function App() {
   const { publicKey } = useWallet();
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null);
-
-  // Auto-register wallet as client
-  useEffect(() => {
-    if (publicKey) {
-      registerClient(publicKey.toString()).catch(() => {});
-    }
-  }, [publicKey]);
+  const { authenticated, loading: authLoading } = useAuth();
 
   if (!publicKey) {
     return (
       <div className="min-h-screen bg-terminal-bg">
         <Header activeView={activeView} onViewChange={setActiveView} />
         <WalletConnect />
+      </div>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-terminal-bg flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-3 h-3 rounded-full bg-terminal-accent animate-pulse mx-auto mb-3" />
+          <span className="font-mono text-sm text-terminal-dim">Authenticating wallet...</span>
+        </div>
       </div>
     );
   }

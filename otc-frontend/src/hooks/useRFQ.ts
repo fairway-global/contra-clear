@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getActiveRFQs, type RFQ } from '../lib/api';
+import { useWSRefresh } from './useWebSocket';
 
 export function useRFQs() {
   const [rfqs, setRFQs] = useState<RFQ[]>([]);
@@ -8,8 +9,7 @@ export function useRFQs() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getActiveRFQs();
-      setRFQs(data);
+      setRFQs(await getActiveRFQs());
     } catch (err) {
       console.error('Failed to fetch RFQs:', err);
     } finally {
@@ -19,9 +19,12 @@ export function useRFQs() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 3000);
+    const interval = setInterval(refresh, 10000); // Slower poll, WS handles fast updates
     return () => clearInterval(interval);
   }, [refresh]);
+
+  // Instant refresh on WS events
+  useWSRefresh(['rfq_created', 'rfq_cancelled', 'quote_submitted', 'trade_completed'], refresh);
 
   return { rfqs, loading, refresh };
 }
