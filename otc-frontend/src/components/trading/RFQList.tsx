@@ -1,5 +1,5 @@
 import { useRFQs } from '../../hooks/useRFQ';
-import { getTokenSymbol, truncateAddress, timeAgo } from '../../lib/constants';
+import { getTokenSymbol, truncateAddress, timeAgo, formatRawAmount } from '../../lib/constants';
 import type { RFQ } from '../../lib/api';
 import Panel from '../layout/Panel';
 
@@ -43,7 +43,7 @@ export default function RFQList({ onSelectRFQ, selectedRFQId }: RFQListProps) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-terminal-dim">{truncateAddress(rfq.creator)}</span>
-                <span className="font-mono text-xs text-terminal-accent">{rfq.sellAmount} {getTokenSymbol(rfq.sellToken)}</span>
+                <span className="font-mono text-xs text-terminal-accent">{formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenSymbol(rfq.sellToken)}</span>
               </div>
             </button>
           ))}

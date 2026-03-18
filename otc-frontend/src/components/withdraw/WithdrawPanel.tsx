@@ -3,7 +3,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { Connection, Transaction } from '@solana/web3.js';
 import toast from 'react-hot-toast';
 import { buildWithdrawTx, confirmWithdrawal } from '../../lib/api';
-import { DEMO_TOKENS, CONTRA_GATEWAY_URL, getTokenSymbol } from '../../lib/constants';
+import { DEMO_TOKENS, CONTRA_GATEWAY_URL, getTokenSymbol, toRawAmount, formatUiAmount } from '../../lib/constants';
 import Panel from '../layout/Panel';
 import { useBalances } from '../../hooks/useBalances';
 
@@ -21,8 +21,9 @@ export default function WithdrawPanel() {
 
     try {
       setStatus('building');
+      const rawAmount = toRawAmount(amount, selectedMint);
       const { withdrawalId, transaction: txBase64 } = await buildWithdrawTx(
-        publicKey.toString(), selectedMint, amount
+        publicKey.toString(), selectedMint, rawAmount
       );
 
       setStatus('signing');
@@ -72,7 +73,7 @@ export default function WithdrawPanel() {
 
         {/* Amount Input */}
         <div>
-          <label className="block text-xs font-mono text-terminal-dim mb-1 uppercase">Amount (raw units)</label>
+          <label className="block text-xs font-mono text-terminal-dim mb-1 uppercase">Amount</label>
           <div className="relative">
             <input
               type="number"
@@ -84,7 +85,7 @@ export default function WithdrawPanel() {
             {selectedBalance && (
               <button
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-terminal-accent hover:brightness-110"
-                onClick={() => setAmount(selectedBalance.amount)}
+                onClick={() => setAmount(selectedBalance.uiAmount.toString())}
               >
                 MAX
               </button>
@@ -92,7 +93,7 @@ export default function WithdrawPanel() {
           </div>
           {selectedBalance && (
             <div className="text-xs font-mono text-terminal-dim mt-1">
-              Channel balance: {selectedBalance.uiAmount} {getTokenSymbol(selectedMint)}
+              Channel balance: {formatUiAmount(selectedBalance.uiAmount)} {getTokenSymbol(selectedMint)}
             </div>
           )}
         </div>

@@ -86,10 +86,16 @@ function initSchema() {
       status TEXT NOT NULL DEFAULT 'pending_signatures',
       leg_a_sig TEXT,
       leg_b_sig TEXT,
+      leg_a_tx TEXT,
+      leg_b_tx TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       completed_at TEXT
     );
   `);
+
+  // Add columns if they don't exist (for existing DBs)
+  try { d.exec('ALTER TABLE trades ADD COLUMN leg_a_tx TEXT'); } catch {}
+  try { d.exec('ALTER TABLE trades ADD COLUMN leg_b_tx TEXT'); } catch {}
 }
 
 // Client operations
@@ -233,6 +239,8 @@ export function updateTrade(id: string, updates: Partial<Trade>) {
   if (updates.status) { fields.push('status = ?'); values.push(updates.status); }
   if (updates.legASig !== undefined) { fields.push('leg_a_sig = ?'); values.push(updates.legASig); }
   if (updates.legBSig !== undefined) { fields.push('leg_b_sig = ?'); values.push(updates.legBSig); }
+  if ((updates as any).legATx !== undefined) { fields.push('leg_a_tx = ?'); values.push((updates as any).legATx); }
+  if ((updates as any).legBTx !== undefined) { fields.push('leg_b_tx = ?'); values.push((updates as any).legBTx); }
   if (updates.completedAt !== undefined) { fields.push('completed_at = ?'); values.push(updates.completedAt); }
   if (fields.length > 0) {
     values.push(id);
@@ -263,4 +271,33 @@ function mapQuote(row: any): Quote {
 
 function mapTrade(row: any): Trade {
   return { id: row.id, rfqId: row.rfq_id, quoteId: row.quote_id, partyA: row.party_a, partyB: row.party_b, sellToken: row.sell_token, sellAmount: row.sell_amount, buyToken: row.buy_token, buyAmount: row.buy_amount, price: row.price, status: row.status, legASig: row.leg_a_sig, legBSig: row.leg_b_sig, createdAt: row.created_at, completedAt: row.completed_at };
+}
+
+// Extended trade with unsigned tx data
+export function getTradeWithTx(id: string): (Trade & { legATx?: string; legBTx?: string }) | null {
+  const row = getDb().prepare('SELECT * FROM trades WHERE id = ?').get(id) as any;
+  if (!row) return null;
+  return { ...mapTrade(row), legATx: row.leg_a_tx, legBTx: row.leg_b_tx };
+}
+
+// Get trades pending signature from a specific wallet
+export function getPendingTradesForWallet(walletAddress: string): (Trade & { legATx?: string; legBTx?: string; myLeg: 'A' | 'B'; myTx: string })[] {
+  const rows = getDb().prepare(
+    "SELECT * FROM trades WHERE status IN ('pending_signatures', 'executing') AND (party_a = ? OR party_b = ?)"
+  ).all(walletAddress, walletAddress) as any[];
+
+  // Only show leg B (counterparty) — creator handles leg A inline during accept
+  return rows.filter(row => {
+    const isB = row.party_b === walletAddress;
+    return isB && !row.leg_b_sig && row.leg_b_tx;
+  }).map(row => {
+    const trade = mapTrade(row);
+    return {
+      ...trade,
+      legATx: row.leg_a_tx,
+      legBTx: row.leg_b_tx,
+      myLeg: 'B' as const,
+      myTx: row.leg_b_tx,
+    };
+  });
 }

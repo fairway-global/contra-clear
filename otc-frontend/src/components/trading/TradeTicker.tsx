@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { useTrades } from '../../hooks/useTrades';
-import { getTokenSymbol, truncateAddress, timeAgo } from '../../lib/constants';
+import { getTokenSymbol, truncateAddress, timeAgo, formatRawAmount } from '../../lib/constants';
 import Panel from '../layout/Panel';
 
 export default function TradeTicker() {
@@ -19,7 +19,7 @@ export default function TradeTicker() {
             <div key={trade.id} className={`flex items-center justify-between px-2 py-2 rounded text-xs font-mono ${i === 0 && isNew ? 'ticker-enter trade-flash-green' : ''} ${trade.status === 'completed' ? '' : 'opacity-50'}`}>
               <div className="flex items-center gap-3">
                 <span>{getTokenSymbol(trade.sellToken)}/{getTokenSymbol(trade.buyToken)}</span>
-                <span className="text-terminal-accent">{trade.sellAmount}</span>
+                <span className="text-terminal-accent">{formatRawAmount(trade.sellAmount, trade.sellToken)}</span>
                 <span className="text-terminal-dim">@</span>
                 <span>{trade.price}</span>
               </div>

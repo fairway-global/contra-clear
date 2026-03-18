@@ -13,6 +13,7 @@ import WithdrawPanel from './components/withdraw/WithdrawPanel';
 import RFQList from './components/trading/RFQList';
 import CreateRFQ from './components/trading/CreateRFQ';
 import QuotePanel from './components/trading/QuotePanel';
+import PendingTrades from './components/trading/PendingTrades';
 import TradeTicker from './components/trading/TradeTicker';
 import AdminDashboard from './components/admin/AdminDashboard';
 
@@ -50,16 +51,19 @@ export default function App() {
         )}
 
         {activeView === 'trade' && (
-          <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-4">
-              <RFQList onSelectRFQ={setSelectedRFQ} selectedRFQId={selectedRFQ?.id} />
-            </div>
-            <div className="col-span-4 space-y-4">
-              <CreateRFQ onCreated={() => setSelectedRFQ(null)} />
-              <QuotePanel rfq={selectedRFQ} />
-            </div>
-            <div className="col-span-4">
-              <TradeTicker />
+          <div className="space-y-4">
+            <PendingTrades />
+            <div className="grid grid-cols-12 gap-4">
+              <div className="col-span-4">
+                <RFQList onSelectRFQ={setSelectedRFQ} selectedRFQId={selectedRFQ?.id} />
+              </div>
+              <div className="col-span-4 space-y-4">
+                <CreateRFQ onCreated={() => setSelectedRFQ(null)} />
+                <QuotePanel rfq={selectedRFQ} onTradeComplete={() => setSelectedRFQ(null)} />
+              </div>
+              <div className="col-span-4">
+                <TradeTicker />
+              </div>
             </div>
           </div>
         )}

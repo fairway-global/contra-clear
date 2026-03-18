@@ -158,6 +158,9 @@ export const acceptQuote = (rfqId: string, quoteId: string) =>
 export const submitTradeLeg = (rfqId: string, tradeId: string, leg: 'A' | 'B', signedTransaction: string) =>
   post<Trade>(`${API_BASE}/rfq/${rfqId}/trade/${tradeId}/submit`, { leg, signedTransaction });
 
+export const rejectQuote = (rfqId: string, quoteId: string) =>
+  post<{ success: boolean }>(`${API_BASE}/rfq/${rfqId}/quote/${quoteId}/reject`, {});
+
 export const cancelRFQ = (rfqId: string) =>
   post<{ success: boolean }>(`${API_BASE}/rfq/${rfqId}/cancel`, {});
 
@@ -167,6 +170,14 @@ export const getAllTrades = (limit = 50) =>
 
 export const getWalletTrades = (walletAddress: string, limit = 50) =>
   fetchJSON<Trade[]>(`${API_BASE}/trades/wallet/${walletAddress}?limit=${limit}`);
+
+export interface PendingTrade extends Trade {
+  myLeg: 'A' | 'B';
+  myTx: string;
+}
+
+export const getPendingTrades = (walletAddress: string) =>
+  fetchJSON<PendingTrade[]>(`${API_BASE}/trades/pending/${walletAddress}`);
 
 // Withdrawal API
 export const buildWithdrawTx = (walletAddress: string, tokenMint: string, amount: string) =>

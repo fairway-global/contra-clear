@@ -58,6 +58,30 @@ export function formatUiAmount(amount: number): string {
   }).format(amount);
 }
 
+// Convert human amount (e.g. "1.5") to raw units string based on token decimals
+export function toRawAmount(humanAmount: string, mint: string): string {
+  const token = getTokenInfo(mint);
+  if (!token) return humanAmount;
+  const num = parseFloat(humanAmount);
+  if (isNaN(num)) return '0';
+  return Math.floor(num * Math.pow(10, token.decimals)).toString();
+}
+
+// Convert raw amount string to human-readable number
+export function toHumanAmount(rawAmount: string, mint: string): number {
+  const token = getTokenInfo(mint);
+  if (!token) return parseFloat(rawAmount);
+  return parseFloat(rawAmount) / Math.pow(10, token.decimals);
+}
+
+// Format raw amount to display string with token symbol
+export function formatRawAmount(rawAmount: string, mint: string): string {
+  const token = getTokenInfo(mint);
+  if (!token) return rawAmount;
+  const human = parseFloat(rawAmount) / Math.pow(10, token.decimals);
+  return formatUiAmount(human);
+}
+
 export function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();

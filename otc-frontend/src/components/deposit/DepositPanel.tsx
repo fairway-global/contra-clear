@@ -3,7 +3,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { Connection, Transaction } from '@solana/web3.js';
 import toast from 'react-hot-toast';
 import { buildDepositTx, confirmDeposit } from '../../lib/api';
-import { DEMO_TOKENS, SOLANA_VALIDATOR_URL, getTokenSymbol } from '../../lib/constants';
+import { DEMO_TOKENS, SOLANA_VALIDATOR_URL, getTokenSymbol, toRawAmount, formatUiAmount } from '../../lib/constants';
 import Panel from '../layout/Panel';
 import { useBalances } from '../../hooks/useBalances';
 
@@ -22,7 +22,8 @@ export default function DepositPanel() {
     try {
       setStatus('building');
       // Build deposit transaction on the server
-      const { transaction: txBase64 } = await buildDepositTx(publicKey.toString(), selectedMint, amount);
+      const rawAmount = toRawAmount(amount, selectedMint);
+      const { transaction: txBase64 } = await buildDepositTx(publicKey.toString(), selectedMint, rawAmount);
 
       setStatus('signing');
       // Deserialize and sign
@@ -37,7 +38,7 @@ export default function DepositPanel() {
       await connection.confirmTransaction(sig, 'confirmed');
 
       // Record the deposit
-      await confirmDeposit(publicKey.toString(), selectedMint, amount, sig);
+      await confirmDeposit(publicKey.toString(), selectedMint, rawAmount, sig);
 
       setStatus('credited');
       toast.success('Deposit confirmed! Waiting for channel credit...');
@@ -81,7 +82,7 @@ export default function DepositPanel() {
 
         {/* Amount Input */}
         <div>
-          <label className="block text-xs font-mono text-terminal-dim mb-1 uppercase">Amount (raw units)</label>
+          <label className="block text-xs font-mono text-terminal-dim mb-1 uppercase">Amount ({getTokenSymbol(selectedMint)})</label>
           <div className="relative">
             <input
               type="number"
@@ -93,7 +94,7 @@ export default function DepositPanel() {
             {selectedBalance && (
               <button
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-terminal-accent hover:brightness-110"
-                onClick={() => setAmount(selectedBalance.amount)}
+                onClick={() => setAmount(selectedBalance.uiAmount.toString())}
               >
                 MAX
               </button>
@@ -101,7 +102,7 @@ export default function DepositPanel() {
           </div>
           {selectedBalance && (
             <div className="text-xs font-mono text-terminal-dim mt-1">
-              Available: {selectedBalance.uiAmount} {getTokenSymbol(selectedMint)}
+              Available: {formatUiAmount(selectedBalance.uiAmount)} {getTokenSymbol(selectedMint)}
             </div>
           )}
         </div>

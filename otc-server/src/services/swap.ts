@@ -1,15 +1,23 @@
-import { PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress, createTransferInstruction,
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
-import { getLatestBlockhash, sendRawTransaction, checkTransactionConfirmed, GATEWAY_URL } from './contra.js';
+import { getLatestBlockhash, checkTransactionConfirmed, getAccountInfo, GATEWAY_URL } from './contra.js';
 import * as store from '../db/store.js';
-import type { Trade, RFQ, Quote } from '../types.js';
+import type { Trade } from '../types.js';
 
-// Build a transfer instruction for one leg of an OTC swap
-export async function buildTransferInstruction(
+async function accountExistsOnChannel(pubkey: string): Promise<boolean> {
+  try {
+    const info = await getAccountInfo(GATEWAY_URL, pubkey);
+    return info?.value !== null;
+  } catch {
+    return false;
+  }
+}
+
+export async function buildTransferInstructions(
   from: PublicKey,
   to: PublicKey,
   mint: PublicKey,
@@ -20,12 +28,16 @@ export async function buildTransferInstruction(
 
   const instructions: TransactionInstruction[] = [];
 
-  // Create ATA for receiver if needed (within the channel, ATAs may need creation)
-  instructions.push(
-    createAssociatedTokenAccountInstruction(
-      from, toAta, to, mint, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
-    )
-  );
+  // Both ATAs must exist on the channel (created during deposit by the operator)
+  const fromAtaExists = await accountExistsOnChannel(fromAta.toString());
+  if (!fromAtaExists) {
+    throw new Error(`Sender has no channel balance for this token. Deposit first.`);
+  }
+
+  const toAtaExists = await accountExistsOnChannel(toAta.toString());
+  if (!toAtaExists) {
+    throw new Error(`Receiver has no channel account for this token. They must deposit first.`);
+  }
 
   instructions.push(
     createTransferInstruction(fromAta, toAta, from, amount, [], TOKEN_PROGRAM_ID)
@@ -34,43 +46,40 @@ export async function buildTransferInstruction(
   return instructions;
 }
 
-// Build the sell-side transaction (Party A sends sellToken to Party B)
+// Build a v0 VersionedTransaction — Phantom won't inject ComputeBudget into these
+async function buildV0Transaction(feePayer: PublicKey, instructions: TransactionInstruction[]): Promise<string> {
+  const { blockhash } = await getLatestBlockhash(GATEWAY_URL);
+
+  const messageV0 = new TransactionMessage({
+    payerKey: feePayer,
+    recentBlockhash: blockhash,
+    instructions,
+  }).compileToV0Message();
+
+  const vtx = new VersionedTransaction(messageV0);
+  return Buffer.from(vtx.serialize()).toString('base64');
+}
+
 export async function buildLegATransaction(trade: Trade): Promise<string> {
   const partyA = new PublicKey(trade.partyA);
   const partyB = new PublicKey(trade.partyB);
   const sellMint = new PublicKey(trade.sellToken);
   const sellAmount = BigInt(trade.sellAmount);
 
-  const instructions = await buildTransferInstruction(partyA, partyB, sellMint, sellAmount);
-  const { blockhash } = await getLatestBlockhash(GATEWAY_URL);
-
-  const tx = new Transaction();
-  instructions.forEach(ix => tx.add(ix));
-  tx.recentBlockhash = blockhash;
-  tx.feePayer = partyA;
-
-  return tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
+  const instructions = await buildTransferInstructions(partyA, partyB, sellMint, sellAmount);
+  return buildV0Transaction(partyA, instructions);
 }
 
-// Build the buy-side transaction (Party B sends buyToken to Party A)
 export async function buildLegBTransaction(trade: Trade): Promise<string> {
   const partyA = new PublicKey(trade.partyA);
   const partyB = new PublicKey(trade.partyB);
   const buyMint = new PublicKey(trade.buyToken);
   const buyAmount = BigInt(trade.buyAmount);
 
-  const instructions = await buildTransferInstruction(partyB, partyA, buyMint, buyAmount);
-  const { blockhash } = await getLatestBlockhash(GATEWAY_URL);
-
-  const tx = new Transaction();
-  instructions.forEach(ix => tx.add(ix));
-  tx.recentBlockhash = blockhash;
-  tx.feePayer = partyB;
-
-  return tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
+  const instructions = await buildTransferInstructions(partyB, partyA, buyMint, buyAmount);
+  return buildV0Transaction(partyB, instructions);
 }
 
-// Execute a trade: accept a quote, create the trade, return transactions for both parties to sign
 export async function initiateTrade(rfqId: string, quoteId: string): Promise<Trade> {
   const rfq = store.getRFQ(rfqId);
   if (!rfq) throw new Error('RFQ not found');
@@ -80,7 +89,6 @@ export async function initiateTrade(rfqId: string, quoteId: string): Promise<Tra
   if (!quote) throw new Error('Quote not found');
   if (quote.status !== 'pending') throw new Error('Quote is not pending');
 
-  // Create the trade
   const trade = store.createTrade(
     rfqId, quoteId,
     rfq.creator, quote.quoter,
@@ -89,32 +97,25 @@ export async function initiateTrade(rfqId: string, quoteId: string): Promise<Tra
     quote.price
   );
 
-  // Update statuses
   store.updateRFQStatus(rfqId, 'accepted');
   store.updateQuoteStatus(quoteId, 'accepted');
 
   return trade;
 }
 
-// Submit a signed transaction leg
 export async function submitTradeLeg(
   tradeId: string,
   leg: 'A' | 'B',
-  signedTx: string
+  signature: string
 ): Promise<Trade> {
   const trade = store.getTrade(tradeId);
   if (!trade) throw new Error('Trade not found');
 
-  // Submit to the Contra gateway
-  const signature = await sendRawTransaction(GATEWAY_URL, signedTx);
-
-  // Wait for confirmation
-  const confirmed = await checkTransactionConfirmed(GATEWAY_URL, signature, 20, 300);
+  const confirmed = await checkTransactionConfirmed(GATEWAY_URL, signature, 30, 500);
   if (!confirmed) {
-    throw new Error(`Trade leg ${leg} transaction not confirmed`);
+    throw new Error(`Trade leg ${leg} transaction not confirmed on channel`);
   }
 
-  // Update trade
   if (leg === 'A') {
     store.updateTrade(tradeId, { legASig: signature, status: trade.legBSig ? 'completed' : 'executing' });
   } else {
@@ -123,10 +124,8 @@ export async function submitTradeLeg(
 
   const updated = store.getTrade(tradeId)!;
 
-  // If both legs are done, mark as completed
   if (updated.legASig && updated.legBSig) {
     store.updateTrade(tradeId, { status: 'completed', completedAt: new Date().toISOString() });
-    // Update the RFQ status
     store.updateRFQStatus(trade.rfqId, 'filled');
   }
 
