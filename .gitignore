@@ -1,0 +1,86 @@
+# -----------------------------
+# OS / Editor
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -----------------------------
+# Environment / Secrets
+# -----------------------------
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.demo
+
+# Key material
+keypairs/
+**/keypairs/
+*.key
+*.pem
+
+# Solana local validator ledgers
+test-ledger/
+**/test-ledger/
+
+# -----------------------------
+# Logs / Runtime temp files
+# -----------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------
+# Node / Frontend
+# -----------------------------
+**/node_modules/
+**/.pnpm-store/
+**/.npm/
+
+**/dist/
+**/build/
+**/.next/
+**/.cache/
+**/.turbo/
+**/.vite/
+
+# TypeScript incremental build state
+**/*.tsbuildinfo
+
+# -----------------------------
+# Rust
+# -----------------------------
+**/target/
+
+# Coverage and generated artifacts
+**/coverage/
+coverage/
+coverage-*.lcov
+**/generated/
+**/escrow-generated/
+**/withdraw-generated/
+
+# Python cache
+**/__pycache__/
+
+# Contra local artifacts
+**/.local/
+contra/indexer/.yellowstone-grpc/
+contra/integration/.yellowstone-grpc/
+**/flamechart_*.svg
+
+# -----------------------------
+# Docker / Compose local overrides
+# -----------------------------
+.docker/
+docker-data/
+*.pid
+contra

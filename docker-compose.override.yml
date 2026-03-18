@@ -1,0 +1,42 @@
+# Docker Compose override for OTC demo
+# Extends contra/docker-compose.yml
+# Usage: docker compose -f contra/docker-compose.yml -f docker-compose.override.yml --env-file contra/.env.local up
+
+services:
+  # OTC API Server
+  otc-server:
+    build:
+      context: ./otc-server
+      dockerfile: Dockerfile
+    container_name: contra-otc-server
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    environment:
+      - OTC_PORT=3001
+      - CONTRA_GATEWAY_URL=http://gateway:8899
+      - SOLANA_VALIDATOR_URL=http://validator:8899
+      - DEMO_TOKEN_MINTS=${DEMO_TOKEN_MINTS:-}
+      - ESCROW_PROGRAM_ID=${ESCROW_PROGRAM_ID}
+      - WITHDRAW_PROGRAM_ID=${WITHDRAW_PROGRAM_ID}
+      - ESCROW_INSTANCE_ID=${ESCROW_INSTANCE_ID:-}
+    ports:
+      - "3001:3001"
+    networks:
+      - contra-network
+
+  # OTC Frontend (dev server — for production, use nginx with built assets)
+  otc-frontend:
+    build:
+      context: ./otc-frontend
+      dockerfile: Dockerfile
+    container_name: contra-otc-frontend
+    restart: unless-stopped
+    depends_on:
+      - otc-server
+    environment:
+      - VITE_DEMO_TOKEN_MINTS=${DEMO_TOKEN_MINTS:-}
+    ports:
+      - "5173:5173"
+    networks:
+      - contra-network
