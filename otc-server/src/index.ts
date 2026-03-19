@@ -22,8 +22,9 @@ const app = new Hono();
 app.use('*', cors());
 app.use('*', logger());
 
-// Auth middleware: protect mutation endpoints
-// GET requests and /api/auth/* are public
+// Auth middleware: protect mutation endpoints.
+// GET requests and /api/auth/* are public.
+// Wallet-based trading routes still require wallet sessions.
 app.use('/api/*', async (c, next) => {
   // Public endpoints — no auth required
   const path = c.req.path;
@@ -33,13 +34,13 @@ app.use('/api/*', async (c, next) => {
   // Check Authorization header
   const authHeader = c.req.header('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
-    return c.json({ error: 'Authentication required. Please connect your wallet.' }, 401);
+    return c.json({ error: 'Authentication required. Please sign in first.' }, 401);
   }
 
   const token = authHeader.slice(7);
   const wallet = getSessionWallet(token);
   if (!wallet) {
-    return c.json({ error: 'Session expired. Please reconnect your wallet.' }, 401);
+    return c.json({ error: 'Session expired or not authorized for wallet-based operations.' }, 401);
   }
 
   // Attach wallet to request headers for downstream use
