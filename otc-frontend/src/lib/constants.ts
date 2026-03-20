@@ -2,8 +2,12 @@ import type { TokenInfo } from './api';
 
 export const API_BASE = '/api';
 
-export const CONTRA_GATEWAY_URL = 'http://localhost:8899';
-export const SOLANA_VALIDATOR_URL = 'http://localhost:18899';
+export const CONTRA_GATEWAY_URL =
+  import.meta.env.VITE_CONTRA_GATEWAY_URL || 'http://localhost:8899';
+
+export const SOLANA_VALIDATOR_URL =
+  import.meta.env.VITE_SOLANA_VALIDATOR_URL || 'http://localhost:18899';
+
 
 export const ESCROW_PROGRAM_ID = 'GokvZqD2yP696rzNBNbQvcZ4VsLW7jNvFXU1kW9m7k83';
 export const WITHDRAW_PROGRAM_ID = 'J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi';
@@ -12,8 +16,8 @@ export const WITHDRAW_PROGRAM_ID = 'J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi
 export const DEMO_TOKENS: TokenInfo[] = [
   {
     mint: '', // Set after running setup-demo.sh
-    symbol: 'USDC',
-    name: 'Demo USDC',
+    symbol: 'USDX',
+    name: 'Demo USDX',
     decimals: 6,
   },
   {

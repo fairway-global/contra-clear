@@ -11,7 +11,9 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 
 // Use the Contra gateway as the default endpoint for channel operations
 // Users switch to localhost:18899 for on-chain deposits (handled in deposit flow)
-const ENDPOINT = 'http://localhost:8899';
+const ENDPOINT =
+  import.meta.env.VITE_CONTRA_GATEWAY_URL || 'http://localhost:8899';
+
 
 function Root() {
   const wallets = useMemo(() => [
