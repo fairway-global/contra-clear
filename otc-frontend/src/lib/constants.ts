@@ -16,8 +16,8 @@ export const WITHDRAW_PROGRAM_ID = 'J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi
 export const DEMO_TOKENS: TokenInfo[] = [
   {
     mint: '', // Set after running setup-demo.sh
-    symbol: 'USDX',
-    name: 'Demo USDX',
+    symbol: 'USDC',
+    name: 'Demo USDC',
     decimals: 6,
   },
   {
