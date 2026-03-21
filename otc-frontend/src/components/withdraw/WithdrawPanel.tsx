@@ -17,7 +17,7 @@ import { useDeposits } from '../../hooks/useDeposits';
 
 export default function WithdrawPanel() {
   const { publicKey, signTransaction } = useWallet();
-  const { channelBalances, refresh } = useBalances();
+  const { channelBalances, onChainBalances, refresh } = useBalances();
   const { deposits } = useDeposits();
   const [selectedMint, setSelectedMint] = useState('');
   const [amount, setAmount] = useState('');
@@ -28,9 +28,11 @@ export default function WithdrawPanel() {
     .map(d => d.tokenMint);
   const validTokens = getTokensForMints([
     ...channelBalances.map(balance => balance.mint),
+    ...onChainBalances.map(balance => balance.mint),
     ...confirmingDepositMints,
   ]);
   const selectedBalance = channelBalances.find(b => b.mint === selectedMint);
+  const selectedOnChainBalance = onChainBalances.find(b => b.mint === selectedMint);
   const confirmingDeposit = deposits.find(d => d.tokenMint === selectedMint && d.status === 'confirming');
 
   useEffect(() => {
@@ -109,7 +111,17 @@ export default function WithdrawPanel() {
           </div>
           {selectedBalance && (
             <div className="text-xs font-mono text-terminal-dim mt-1">
-              Channel balance: {formatUiAmount(selectedBalance.uiAmount)} {getTokenSymbol(selectedMint)}
+              Available on Contra: {formatUiAmount(selectedBalance.uiAmount)} {getTokenSymbol(selectedMint)}
+            </div>
+          )}
+          {!selectedBalance && selectedMint && (
+            <div className="text-xs font-mono text-terminal-dim mt-1">
+              Available on Contra: 0.00 {getTokenSymbol(selectedMint)}
+            </div>
+          )}
+          {selectedOnChainBalance && (
+            <div className="text-xs font-mono text-terminal-dim mt-1">
+              Available on wallet: {formatUiAmount(selectedOnChainBalance.uiAmount)} {getTokenSymbol(selectedMint)}
             </div>
           )}
           {!selectedBalance && confirmingDeposit && (

@@ -63,12 +63,15 @@ export interface User {
 export interface RFQ {
   id: string;
   reference: string;
+  sequence?: string;
   originatorId: string;
   originatorName: string;
   sellToken: string;
   sellAmount: string;
   buyToken: string;
   indicativeBuyAmount: string;
+  requiredTier?: number;
+  expiresInSeconds?: number;
   side: QuoteSide;
   status: RFQStatus;
   createdAt: string;
@@ -154,10 +157,13 @@ export interface OTCAdminOverview {
 
 export interface CreateRFQInput {
   originatorId: string;
+  sequence: string;
   sellToken: string;
   sellAmount: string;
   buyToken: string;
-  notes?: string;
+  indicativeBuyAmount: string;
+  requiredTier: number;
+  expiresInSeconds: number;
 }
 
 export interface SubmitQuoteInput {

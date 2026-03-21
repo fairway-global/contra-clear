@@ -7,6 +7,7 @@ export const SOLANA_VALIDATOR_URL = import.meta.env.VITE_SOLANA_VALIDATOR_URL ||
 
 export const ESCROW_PROGRAM_ID = 'GokvZqD2yP696rzNBNbQvcZ4VsLW7jNvFXU1kW9m7k83';
 export const WITHDRAW_PROGRAM_ID = 'J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi';
+const JUPITER_TOKEN_SEARCH_URL = 'https://lite-api.jup.ag/tokens/v2/search';
 
 const KNOWN_TOKEN_OVERRIDES: Record<string, TokenInfo> = {
   '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': {
@@ -21,9 +22,17 @@ const KNOWN_TOKEN_OVERRIDES: Record<string, TokenInfo> = {
     name: 'Wrapped SOL',
     decimals: 9,
   },
+  'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr': {
+    mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr',
+    symbol: 'EURC',
+    name: 'Euro Coin',
+    decimals: 6,
+  },
 };
 
 const TOKEN_REGISTRY = new Map<string, TokenInfo>();
+const TOKEN_REGISTRY_LISTENERS = new Set<() => void>();
+const TOKEN_LOOKUP_PROMISES = new Map<string, Promise<TokenInfo | null>>();
 
 function createFallbackTokenInfo(mint: string, decimals = 6): TokenInfo {
   return {
@@ -45,6 +54,65 @@ function seedRegistry() {
 
 seedRegistry();
 
+function notifyTokenRegistryListeners(): void {
+  TOKEN_REGISTRY_LISTENERS.forEach((listener) => listener());
+}
+
+function isResolvedTokenInfo(token: TokenInfo | undefined): boolean {
+  if (!token) {
+    return false;
+  }
+
+  return token.symbol !== truncateAddress(token.mint) && token.name !== `SPL Token ${truncateAddress(token.mint, 6)}`;
+}
+
+async function fetchRemoteTokenInfo(mint: string): Promise<TokenInfo | null> {
+  try {
+    const response = await fetch(`${JUPITER_TOKEN_SEARCH_URL}?query=${encodeURIComponent(mint)}`);
+    if (!response.ok) {
+      return null;
+    }
+
+    const results = await response.json() as Array<{
+      id?: string;
+      name?: string;
+      symbol?: string;
+      decimals?: number;
+    }>;
+    const match = results.find((item) => item.id === mint);
+    if (!match || !match.symbol || !match.name) {
+      return null;
+    }
+
+    return registerTokenInfo({
+      mint,
+      symbol: match.symbol,
+      name: match.name,
+      decimals: match.decimals,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function ensureRemoteTokenInfo(mint: string): Promise<TokenInfo | null> {
+  const existing = TOKEN_REGISTRY.get(mint);
+  if (isResolvedTokenInfo(existing)) {
+    return Promise.resolve(existing || null);
+  }
+
+  const inFlight = TOKEN_LOOKUP_PROMISES.get(mint);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = fetchRemoteTokenInfo(mint).finally(() => {
+    TOKEN_LOOKUP_PROMISES.delete(mint);
+  });
+  TOKEN_LOOKUP_PROMISES.set(mint, request);
+  return request;
+}
+
 export function registerTokenInfo(token: Partial<TokenInfo> & { mint: string }): TokenInfo {
   const known = KNOWN_TOKEN_OVERRIDES[token.mint];
   const existing = TOKEN_REGISTRY.get(token.mint);
@@ -57,7 +125,16 @@ export function registerTokenInfo(token: Partial<TokenInfo> & { mint: string }):
     decimals: token.decimals ?? existing?.decimals ?? known?.decimals ?? fallback.decimals,
   };
 
+  const changed =
+    !existing ||
+    existing.symbol !== next.symbol ||
+    existing.name !== next.name ||
+    existing.decimals !== next.decimals;
+
   TOKEN_REGISTRY.set(token.mint, next);
+  if (changed) {
+    notifyTokenRegistryListeners();
+  }
   return next;
 }
 
@@ -67,6 +144,7 @@ export function registerBalanceTokens(balances: ChannelBalance[]): void {
       mint: balance.mint,
       decimals: balance.decimals,
     });
+    void ensureRemoteTokenInfo(balance.mint);
   });
 }
 
@@ -87,7 +165,18 @@ export function getTokenName(mint: string): string {
 }
 
 export function getTokensForMints(mints: string[]): TokenInfo[] {
-  return Array.from(new Set(mints.filter(Boolean))).map((mint) => registerTokenInfo({ mint }));
+  return Array.from(new Set(mints.filter(Boolean))).map((mint) => {
+    const token = registerTokenInfo({ mint });
+    void ensureRemoteTokenInfo(mint);
+    return token;
+  });
+}
+
+export function subscribeTokenRegistry(listener: () => void): () => void {
+  TOKEN_REGISTRY_LISTENERS.add(listener);
+  return () => {
+    TOKEN_REGISTRY_LISTENERS.delete(listener);
+  };
 }
 
 export function truncateAddress(addr: string, chars = 4): string {

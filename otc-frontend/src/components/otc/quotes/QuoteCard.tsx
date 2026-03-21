@@ -23,7 +23,9 @@ export default function QuoteCard({
   onCounter,
 }: QuoteCardProps) {
   const canNegotiate = !rfq.selectedQuoteId && ![QuoteStatus.Rejected, QuoteStatus.Cancelled, QuoteStatus.Expired, QuoteStatus.Settled].includes(quote.status);
-  const canAccept = viewerRole === UserRole.RFQ_ORIGINATOR && canNegotiate;
+  const canOriginatorAccept = viewerRole === UserRole.RFQ_ORIGINATOR && quote.submittedByRole === UserRole.LIQUIDITY_PROVIDER && canNegotiate;
+  const canProviderAccept = viewerRole === UserRole.LIQUIDITY_PROVIDER && quote.submittedByRole === UserRole.RFQ_ORIGINATOR && canNegotiate;
+  const canAccept = canOriginatorAccept || canProviderAccept;
 
   return (
     <div className="rounded border border-terminal-border bg-terminal-bg p-4">
@@ -53,7 +55,7 @@ export default function QuoteCard({
           {quote.note ? <div className="font-mono text-xs leading-6 text-terminal-dim">{quote.note}</div> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {canAccept ? (
+          {canOriginatorAccept ? (
             <>
               <button type="button" className="btn-secondary" onClick={() => onCounter?.(quote)}>
                 Counter
@@ -63,6 +65,15 @@ export default function QuoteCard({
               </button>
               <button type="button" className="btn-primary" onClick={() => onAccept?.(quote)}>
                 Accept
+              </button>
+            </>
+          ) : canProviderAccept ? (
+            <>
+              <button type="button" className="btn-secondary" onClick={() => onCounter?.(quote)}>
+                Revise
+              </button>
+              <button type="button" className="btn-primary" onClick={() => onAccept?.(quote)}>
+                Accept Counter
               </button>
             </>
           ) : canNegotiate ? (

@@ -1,4 +1,4 @@
-import { formatRawAmount, getTokenSymbol } from '../constants';
+import { formatRawAmount, getTokenSymbol, toRawAmount } from '../constants';
 import {
   type ActivityEvent,
   type CounterQuoteInput,
@@ -101,12 +101,15 @@ function seedState(): MockState {
     {
       id: 'rfq-open-1',
       reference: makeReference(1012),
+      sequence: '1774069873334',
       originatorId: 'user-originator-1',
       originatorName: 'Alemu Treasury Partners',
       sellToken: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
       sellAmount: '2000000',
       buyToken: 'So11111111111111111111111111111111111111112',
       indicativeBuyAmount: '100000000',
+      requiredTier: 1,
+      expiresInSeconds: 3600,
       side: 'sell',
       status: RFQStatus.OpenForQuotes,
       createdAt: isoMinutesAgo(18),
@@ -117,12 +120,15 @@ function seedState(): MockState {
     {
       id: 'rfq-negotiating-1',
       reference: makeReference(1011),
+      sequence: '1774069851022',
       originatorId: 'user-originator-1',
       originatorName: 'Alemu Treasury Partners',
       sellToken: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
       sellAmount: '7500000',
       buyToken: 'So11111111111111111111111111111111111111112',
       indicativeBuyAmount: '365000000',
+      requiredTier: 1,
+      expiresInSeconds: 3600,
       side: 'sell',
       status: RFQStatus.Negotiating,
       createdAt: isoMinutesAgo(94),
@@ -133,12 +139,15 @@ function seedState(): MockState {
     {
       id: 'rfq-settled-1',
       reference: makeReference(1010),
+      sequence: '1774069600451',
       originatorId: 'user-originator-1',
       originatorName: 'Alemu Treasury Partners',
       sellToken: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
       sellAmount: '1000000',
       buyToken: 'So11111111111111111111111111111111111111112',
       indicativeBuyAmount: '48000000',
+      requiredTier: 1,
+      expiresInSeconds: 3600,
       side: 'sell',
       status: RFQStatus.Settled,
       createdAt: isoMinutesAgo(360),
@@ -409,18 +418,41 @@ function seedState(): MockState {
   return { users, rfqs, quotes, escrows, activities };
 }
 
+function normalizeState(state: MockState): MockState {
+  return {
+    ...state,
+    rfqs: state.rfqs.map((rfq) => {
+      const createdAtMs = new Date(rfq.createdAt).getTime();
+      const expiresAtMs = new Date(rfq.expiresAt).getTime();
+      const derivedExpiresInSeconds =
+        Number.isFinite(createdAtMs) && Number.isFinite(expiresAtMs) && expiresAtMs > createdAtMs
+          ? Math.max(1, Math.round((expiresAtMs - createdAtMs) / 1000))
+          : 3600;
+
+      return {
+        ...rfq,
+        sequence: rfq.sequence || String(Number.isFinite(createdAtMs) ? createdAtMs : Date.now()),
+        requiredTier: rfq.requiredTier ?? 1,
+        expiresInSeconds: rfq.expiresInSeconds ?? derivedExpiresInSeconds,
+      };
+    }),
+  };
+}
+
 function readState(): MockState {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) {
-    const seeded = seedState();
+    const seeded = normalizeState(seedState());
     writeState(seeded);
     return seeded;
   }
 
   try {
-    return JSON.parse(raw) as MockState;
+    const normalized = normalizeState(JSON.parse(raw) as MockState);
+    writeState(normalized);
+    return normalized;
   } catch {
-    const seeded = seedState();
+    const seeded = normalizeState(seedState());
     writeState(seeded);
     return seeded;
   }
@@ -545,6 +577,15 @@ function latestQuotesByProvider(quotes: Quote[]): Quote[] {
   return sortNewestFirst(Array.from(grouped.values()));
 }
 
+function resolveNegotiatedSellAmount(rfq: RFQ, price: string): string {
+  const numericPrice = Number(price);
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+    return rfq.sellAmount;
+  }
+
+  return toRawAmount(price, rfq.sellToken);
+}
+
 export async function listRFQs(viewer: ViewerIdentity): Promise<RFQ[]> {
   const state = readState();
   const result = sortNewestFirst(state.rfqs.filter((rfq) => {
@@ -564,21 +605,24 @@ export async function createRFQ(input: CreateRFQInput): Promise<RFQ> {
     const originator = getUserFromState(state, input.originatorId);
     const reference = makeReference(state.rfqs.length + 1013);
     const now = new Date().toISOString();
+    const expiresInSeconds = Math.max(1, input.expiresInSeconds);
     const rfq: RFQ = {
       id: createId('rfq'),
       reference,
+      sequence: input.sequence,
       originatorId: originator.id,
       originatorName: originator.fullName,
       sellToken: input.sellToken,
       sellAmount: input.sellAmount,
       buyToken: input.buyToken,
-      indicativeBuyAmount: '0',
+      indicativeBuyAmount: input.indicativeBuyAmount,
+      requiredTier: input.requiredTier,
+      expiresInSeconds,
       side: 'sell',
       status: RFQStatus.OpenForQuotes,
       createdAt: now,
       updatedAt: now,
-      expiresAt: isoMinutesFromNow(60),
-      notes: input.notes,
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
     };
 
     state.rfqs.push(rfq);
@@ -612,7 +656,7 @@ export async function createRFQ(input: CreateRFQInput): Promise<RFQ> {
       originator.id,
       originator.fullName,
       'RFQ created and routed privately to eligible liquidity providers.',
-      input.notes,
+      `Sequence ${rfq.sequence} · Indicative ${formatRawAmount(rfq.indicativeBuyAmount, rfq.buyToken)} ${getTokenSymbol(rfq.buyToken)} · Tier ${rfq.requiredTier} · Expires in ${rfq.expiresInSeconds}s.`,
     );
 
     return rfq;
@@ -654,7 +698,7 @@ export async function submitQuote(input: SubmitQuoteInput): Promise<Quote> {
       submittedByName: provider.fullName,
       version: latestVersion + 1,
       price: input.price,
-      sellAmount: rfq.sellAmount,
+      sellAmount: resolveNegotiatedSellAmount(rfq, input.price),
       buyAmount: input.buyAmount,
       status: versions.length > 0 ? QuoteStatus.Negotiating : QuoteStatus.Submitted,
       note: input.note,
@@ -717,7 +761,7 @@ export async function counterQuote(input: CounterQuoteInput): Promise<Quote> {
       submittedByName: actor.fullName,
       version: nextVersion,
       price: input.price,
-      sellAmount: rfq.sellAmount,
+      sellAmount: resolveNegotiatedSellAmount(rfq, input.price),
       buyAmount: input.buyAmount,
       status: input.actorRole === UserRole.RFQ_ORIGINATOR ? QuoteStatus.Countered : QuoteStatus.Negotiating,
       note: input.note,
@@ -781,12 +825,14 @@ export async function acceptQuote(rfqId: string, quoteId: string, actorId: strin
     rfq.selectedProviderId = quote.providerId;
     rfq.selectedProviderName = quote.providerName;
     rfq.acceptedPrice = quote.price;
+    rfq.sellAmount = quote.sellAmount;
     rfq.indicativeBuyAmount = quote.buyAmount;
     rfq.updatedAt = now;
 
     const originatorEscrow = state.escrows.find((escrow) => escrow.rfqId === rfq.id && escrow.partyRole === UserRole.RFQ_ORIGINATOR);
     const providerEscrow = state.escrows.find((escrow) => escrow.rfqId === rfq.id && escrow.partyRole === UserRole.LIQUIDITY_PROVIDER);
     if (originatorEscrow) {
+      originatorEscrow.amount = quote.sellAmount;
       originatorEscrow.status = EscrowStatus.DepositRequested;
       originatorEscrow.updatedAt = now;
     }

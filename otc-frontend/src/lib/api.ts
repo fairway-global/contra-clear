@@ -93,6 +93,42 @@ export interface AdminOverview {
   contraSlot: number;
 }
 
+export interface AdminTradeRow {
+  id: string;
+  party_a: string;
+  party_b: string;
+  sell_display: string;
+  buy_display: string;
+  price: string;
+  status: string;
+  created_at: string;
+}
+
+export interface AdminDepositRow {
+  id: string;
+  wallet_address: string;
+  token_mint: string;
+  amount_display: string;
+  status: string;
+  tx_signature: string;
+  created_at: string;
+}
+
+export interface AdminWithdrawalRow {
+  id: string;
+  wallet_address: string;
+  token_mint: string;
+  amount_display: string;
+  status: string;
+  channel_tx_signature: string | null;
+  created_at: string;
+}
+
+export interface HealthResponse {
+  status: string;
+  contraSlot: number;
+}
+
 // Import auth token getter dynamically to avoid circular deps
 function getToken(): string | null {
   try {
@@ -127,6 +163,9 @@ export const registerClient = (walletAddress: string, label = '') =>
 
 export const getClients = () =>
   fetchJSON<Client[]>(`${API_BASE}/clients`);
+
+export const getAdminClients = () =>
+  fetchJSON<Client[]>(`${API_BASE}/admin/clients`);
 
 // Balance API
 export const getBalances = (walletAddress: string) =>
@@ -210,14 +249,14 @@ export const getAdminOverview = () =>
   fetchJSON<AdminOverview>(`${API_BASE}/admin/overview`);
 
 export const getAdminTrades = () =>
-  fetchJSON<any[]>(`${API_BASE}/admin/trades`);
+  fetchJSON<AdminTradeRow[]>(`${API_BASE}/admin/trades`);
 
 export const getAdminDeposits = () =>
-  fetchJSON<any[]>(`${API_BASE}/admin/deposits`);
+  fetchJSON<AdminDepositRow[]>(`${API_BASE}/admin/deposits`);
 
 export const getAdminWithdrawals = () =>
-  fetchJSON<any[]>(`${API_BASE}/admin/withdrawals`);
+  fetchJSON<AdminWithdrawalRow[]>(`${API_BASE}/admin/withdrawals`);
 
 // Health
 export const getHealth = () =>
-  fetchJSON<{ status: string; contraSlot: number }>('/health');
+  fetchJSON<HealthResponse>('/health');

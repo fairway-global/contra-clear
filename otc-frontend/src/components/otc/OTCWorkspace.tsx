@@ -212,7 +212,15 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
 
   const rfqListTitle = role === UserRole.RFQ_ORIGINATOR ? 'My RFQs' : 'Eligible RFQs';
 
-  const handleCreateRFQ = async (payload: { sellToken: string; sellAmount: string; buyToken: string; notes: string }) => {
+  const handleCreateRFQ = async (payload: {
+    sequence: string;
+    sellToken: string;
+    sellAmount: string;
+    indicativeBuyAmount: string;
+    buyToken: string;
+    requiredTier: string;
+    expiresInSeconds: string;
+  }) => {
     if (!currentUser) {
       return;
     }
@@ -221,10 +229,13 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     try {
       const next = await createRFQ({
         originatorId: currentUser.id,
+        sequence: payload.sequence,
         sellToken: payload.sellToken,
         sellAmount: toRawAmount(payload.sellAmount, payload.sellToken),
         buyToken: payload.buyToken,
-        notes: payload.notes,
+        indicativeBuyAmount: toRawAmount(payload.indicativeBuyAmount, payload.buyToken),
+        requiredTier: Number(payload.requiredTier),
+        expiresInSeconds: Number(payload.expiresInSeconds),
       });
 
       setCreateOpen(false);

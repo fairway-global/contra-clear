@@ -30,6 +30,7 @@ type AppRoute =
   | { kind: 'otc-escrow'; path: '/otc/escrow' }
   | { kind: 'otc-settlements'; path: '/otc/settlements' }
   | { kind: 'admin-otc'; path: '/admin/otc' }
+  | { kind: 'admin-rfqs'; path: '/admin/rfqs' }
   | { kind: 'admin-users'; path: '/admin/users' }
   | { kind: 'admin-settlements'; path: '/admin/settlements' }
   | { kind: 'admin-escrow'; path: '/admin/escrow' };
@@ -77,6 +78,9 @@ function parseRoute(pathname: string): AppRoute {
   }
   if (path === '/admin' || path === '/admin/otc') {
     return { kind: 'admin-otc', path: '/admin/otc' };
+  }
+  if (path === '/admin/rfqs') {
+    return { kind: 'admin-rfqs', path };
   }
   if (path === '/admin/users') {
     return { kind: 'admin-users', path };
@@ -357,6 +361,7 @@ export default function App() {
     }
   } else if (
     route.kind === 'admin-otc' ||
+    route.kind === 'admin-rfqs' ||
     route.kind === 'admin-users' ||
     route.kind === 'admin-settlements' ||
     route.kind === 'admin-escrow'
@@ -366,7 +371,9 @@ export default function App() {
         route={
           route.kind === 'admin-otc'
             ? '/admin/otc'
-            : route.kind === 'admin-users'
+            : route.kind === 'admin-rfqs'
+              ? '/admin/rfqs'
+              : route.kind === 'admin-users'
               ? '/admin/users'
               : route.kind === 'admin-settlements'
                 ? '/admin/settlements'

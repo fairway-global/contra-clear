@@ -9,6 +9,8 @@ interface RFQDetailsHeaderProps {
 }
 
 export default function RFQDetailsHeader({ rfq, action }: RFQDetailsHeaderProps) {
+  const expiresLabel = rfq.expiresInSeconds ? `${rfq.expiresInSeconds}s` : timeAgo(rfq.expiresAt);
+
   return (
     <div className="panel p-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -22,10 +24,14 @@ export default function RFQDetailsHeader({ rfq, action }: RFQDetailsHeaderProps)
               {getTokenSymbol(rfq.sellToken)} to {getTokenSymbol(rfq.buyToken)}
             </h2>
             <p className="mt-1 font-mono text-xs text-terminal-dim">
-              Sell {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenName(rfq.sellToken)} for {getTokenName(rfq.buyToken)}.
+              Base {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenName(rfq.sellToken)} for indicative {formatRawAmount(rfq.indicativeBuyAmount, rfq.buyToken)} {getTokenName(rfq.buyToken)}.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-terminal-dim">Sequence</div>
+              <div className="mt-1 font-mono text-sm text-terminal-text">{rfq.sequence || 'Auto'}</div>
+            </div>
             <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">
               <div className="text-[11px] font-mono uppercase tracking-wider text-terminal-dim">Originator</div>
               <div className="mt-1 font-mono text-sm text-terminal-text">{rfq.originatorName}</div>
@@ -33,6 +39,14 @@ export default function RFQDetailsHeader({ rfq, action }: RFQDetailsHeaderProps)
             <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">
               <div className="text-[11px] font-mono uppercase tracking-wider text-terminal-dim">Provider</div>
               <div className="mt-1 font-mono text-sm text-terminal-text">{rfq.selectedProviderName || 'Pending'}</div>
+            </div>
+            <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-terminal-dim">Required Tier</div>
+              <div className="mt-1 font-mono text-sm text-terminal-text">{rfq.requiredTier ?? 1}</div>
+            </div>
+            <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-terminal-dim">Expiry Window</div>
+              <div className="mt-1 font-mono text-sm text-terminal-text">{expiresLabel}</div>
             </div>
             <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">
               <div className="text-[11px] font-mono uppercase tracking-wider text-terminal-dim">Updated</div>

@@ -30,11 +30,16 @@ export default function Header({
   const { publicKey } = useWallet();
   const { connected: contraConnected, slot } = useContraHealth();
   const showWalletControls = Boolean(currentUser);
+  const homePath = currentUser
+    ? currentUser.role === UserRole.ADMIN
+      ? '/admin/otc'
+      : '/otc/rfqs'
+    : '/';
 
   const navItems = currentUser?.role === UserRole.ADMIN
     ? [
-        { path: '/', label: 'Overview' },
         { path: '/admin/otc', label: 'Activities' },
+        { path: '/admin/rfqs', label: 'RFQs' },
         { path: '/admin/users', label: 'Users' },
         { path: '/admin/settlements', label: 'Settlements' },
         { path: '/admin/escrow', label: 'Escrow' },
@@ -57,7 +62,7 @@ export default function Header({
     <header className="border-b border-terminal-border bg-terminal-surface">
       <div className="flex min-h-14 flex-col gap-3 px-6 py-3 xl:flex-row xl:items-center xl:justify-between xl:py-0">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-6">
-          <button type="button" className="flex items-center gap-2 text-left" onClick={() => onNavigate('/')}>
+          <button type="button" className="flex items-center gap-2 text-left" onClick={() => onNavigate(homePath)}>
             <div className="h-2 w-2 rounded-full bg-terminal-accent animate-pulse" />
             <span className="font-mono text-sm font-bold tracking-wider text-terminal-accent">
               CONTRA OTC
