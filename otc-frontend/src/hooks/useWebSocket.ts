@@ -8,7 +8,7 @@ type WSEvent = {
 
 type EventHandler = (event: WSEvent) => void;
 
-const WS_URL = 'ws://localhost:3002';
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
 
 let globalWs: WebSocket | null = null;
 const listeners = new Set<EventHandler>();

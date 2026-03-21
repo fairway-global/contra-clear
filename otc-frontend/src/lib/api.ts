@@ -145,6 +145,9 @@ export const confirmDeposit = (walletAddress: string, tokenMint: string, amount:
 export const getDepositStatus = (txSig: string) =>
   fetchJSON<DepositRecord>(`${API_BASE}/deposit/status/${txSig}`);
 
+export const getWalletDeposits = (walletAddress: string) =>
+  fetchJSON<DepositRecord[]>(`${API_BASE}/deposit/wallet/${walletAddress}`);
+
 // RFQ API
 export const createRFQ = (creator: string, sellToken: string, sellAmount: string, buyToken: string, side = 'sell') =>
   post<RFQ>(`${API_BASE}/rfq/create`, { creator, sellToken, sellAmount, buyToken, side });

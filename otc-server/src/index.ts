@@ -11,10 +11,11 @@ import rfqRouter from './routes/rfq.js';
 import tradesRouter from './routes/trades.js';
 import withdrawalsRouter from './routes/withdrawals.js';
 
-import { getDb } from './db/store.js';
+import { getAllDeposits, getDb } from './db/store.js';
 import { getSlot, GATEWAY_URL, VALIDATOR_URL } from './services/contra.js';
 import { getSessionWallet } from './services/auth.js';
 import { startWebSocketServer, broadcast } from './services/ws.js';
+import { reconcileDeposits } from './services/deposit-status.js';
 
 const app = new Hono();
 
@@ -116,11 +117,16 @@ app.get('/api/admin/trades', (c) => {
   })));
 });
 
-app.get('/api/admin/deposits', (c) => {
-  const rows = getDb().prepare('SELECT * FROM deposits ORDER BY created_at DESC LIMIT 100').all() as any[];
+app.get('/api/admin/deposits', async (c) => {
+  const rows = await reconcileDeposits(getAllDeposits(100));
   return c.json(rows.map(r => ({
     ...r,
-    amount_display: formatRaw(r.amount, r.token_mint),
+    wallet_address: r.walletAddress,
+    token_mint: r.tokenMint,
+    tx_signature: r.txSignature,
+    created_at: r.createdAt,
+    updated_at: r.updatedAt,
+    amount_display: formatRaw(r.amount, r.tokenMint),
   })));
 });
 
@@ -145,7 +151,7 @@ console.log(`
   ║  API Server: http://localhost:${PORT}       ║
   ║  WebSocket:  ws://localhost:${WS_PORT}         ║
   ║  Gateway:    ${GATEWAY_URL}    ║
-  ║  Validator:  ${VALIDATOR_URL} ║
+  ║  Solana RPC: ${VALIDATOR_URL} ║
   ╚══════════════════════════════════════════╝
 `);
 

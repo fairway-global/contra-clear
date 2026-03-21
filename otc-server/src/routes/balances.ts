@@ -1,13 +1,11 @@
 import { Hono } from 'hono';
-import { getChannelBalances, getOnChainBalance } from '../services/contra.js';
+import { getChannelBalances, getMintDecimals, getOnChainBalances } from '../services/contra.js';
 import { getAdjustments } from '../services/effective-balance.js';
 import type { ChannelBalance } from '../types.js';
 
-const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
-
 const app = new Hono();
 
-function applyAdjustments(balances: ChannelBalance[], adjustments: Map<string, bigint>): ChannelBalance[] {
+async function applyAdjustments(balances: ChannelBalance[], adjustments: Map<string, bigint>): Promise<ChannelBalance[]> {
   const result = balances.map(b => ({ ...b }));
 
   for (const [mint, adj] of adjustments) {
@@ -18,7 +16,7 @@ function applyAdjustments(balances: ChannelBalance[], adjustments: Map<string, b
       existing.amount = clamped.toString();
       existing.uiAmount = Number(clamped) / Math.pow(10, existing.decimals);
     } else if (adj > 0n) {
-      const decimals = mint === DEMO_MINTS[0] ? 6 : 9;
+      const decimals = await getMintDecimals(mint);
       result.push({ mint, amount: adj.toString(), decimals, uiAmount: Number(adj) / Math.pow(10, decimals) });
     }
   }
@@ -28,29 +26,26 @@ function applyAdjustments(balances: ChannelBalance[], adjustments: Map<string, b
 
 app.get('/channel/:walletAddress', async (c) => {
   const walletAddress = c.req.param('walletAddress');
-  if (DEMO_MINTS.length === 0) return c.json({ balances: [], warning: 'No DEMO_TOKEN_MINTS configured' });
-  const balances = await getChannelBalances(walletAddress, DEMO_MINTS);
+  const balances = await getChannelBalances(walletAddress);
   const adjustments = getAdjustments(walletAddress);
-  return c.json({ balances: applyAdjustments(balances, adjustments) });
+  return c.json({ balances: await applyAdjustments(balances, adjustments) });
 });
 
 app.get('/onchain/:walletAddress', async (c) => {
   const walletAddress = c.req.param('walletAddress');
-  if (DEMO_MINTS.length === 0) return c.json({ balances: [], warning: 'No DEMO_TOKEN_MINTS configured' });
-  const balances = await Promise.all(DEMO_MINTS.map(mint => getOnChainBalance(walletAddress, mint)));
-  return c.json({ balances: balances.filter(b => b !== null) });
+  return c.json({ balances: await getOnChainBalances(walletAddress) });
 });
 
 app.get('/:walletAddress', async (c) => {
   const walletAddress = c.req.param('walletAddress');
   const [channelBalances, onChainBalances] = await Promise.all([
-    getChannelBalances(walletAddress, DEMO_MINTS),
-    Promise.all(DEMO_MINTS.map(mint => getOnChainBalance(walletAddress, mint))),
+    getChannelBalances(walletAddress),
+    getOnChainBalances(walletAddress),
   ]);
   const adjustments = getAdjustments(walletAddress);
   return c.json({
-    channel: applyAdjustments(channelBalances, adjustments),
-    onChain: onChainBalances.filter(b => b !== null),
+    channel: await applyAdjustments(channelBalances, adjustments),
+    onChain: onChainBalances,
   });
 });
 

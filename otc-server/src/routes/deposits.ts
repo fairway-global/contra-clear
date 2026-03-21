@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import * as store from '../db/store.js';
 import { buildDepositTransaction } from '../services/escrow.js';
 import { checkTransactionConfirmed, getChannelBalance, VALIDATOR_URL } from '../services/contra.js';
+import { reconcileDepositStatus, reconcileDeposits } from '../services/deposit-status.js';
+import { broadcast } from '../services/ws.js';
 
 const app = new Hono();
 
@@ -16,7 +18,9 @@ app.post('/', async (c) => {
     const { transaction, message } = await buildDepositTransaction(walletAddress, tokenMint, amount);
     return c.json({ transaction, message });
   } catch (err: any) {
-    return c.json({ error: err.message }, 500);
+    const message = err?.message || 'Failed to build deposit transaction';
+    const status = message.includes('Cannot reach RPC') ? 503 : 500;
+    return c.json({ error: message }, status);
   }
 });
 
@@ -37,15 +41,16 @@ app.post('/confirm', async (c) => {
 });
 
 // Get deposit status
-app.get('/status/:txSig', (c) => {
-  const deposit = store.getDepositByTxSig(c.req.param('txSig'));
+app.get('/status/:txSig', async (c) => {
+  const deposit = await reconcileDepositStatus(store.getDepositByTxSig(c.req.param('txSig')));
   if (!deposit) return c.json({ error: 'Deposit not found' }, 404);
   return c.json(deposit);
 });
 
 // Get deposits for a wallet
-app.get('/wallet/:walletAddress', (c) => {
-  return c.json(store.getDepositsByWallet(c.req.param('walletAddress')));
+app.get('/wallet/:walletAddress', async (c) => {
+  const deposits = await reconcileDeposits(store.getDepositsByWallet(c.req.param('walletAddress')));
+  return c.json(deposits);
 });
 
 // Background polling to detect when the indexer/operator has credited the channel
@@ -64,6 +69,10 @@ async function pollDepositStatus(depositId: string, walletAddress: string, token
     const balance = await getChannelBalance(walletAddress, tokenMint);
     if (balance && BigInt(balance.amount) > 0n) {
       store.updateDepositStatus(depositId, 'credited');
+      const updated = store.getDeposit(depositId);
+      if (updated) {
+        broadcast({ type: 'deposit_credited', data: updated });
+      }
       return;
     }
     await new Promise(r => setTimeout(r, 3000));

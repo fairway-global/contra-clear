@@ -22,7 +22,7 @@ app.post('/', async (c) => {
   const requested = BigInt(amount);
 
   if (available < requested) {
-    const decimals = getDecimals(tokenMint);
+    const decimals = await getDecimals(tokenMint);
     const availHuman = (Number(available) / Math.pow(10, decimals)).toFixed(4);
     const reqHuman = (Number(requested) / Math.pow(10, decimals)).toFixed(4);
     return c.json({ error: `Insufficient balance. Available: ${availHuman}, requested: ${reqHuman}` }, 400);

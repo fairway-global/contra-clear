@@ -1,40 +1,93 @@
-import type { TokenInfo } from './api';
+import type { ChannelBalance, TokenInfo } from './api';
 
 export const API_BASE = '/api';
 
-export const CONTRA_GATEWAY_URL = 'http://localhost:8899';
-export const SOLANA_VALIDATOR_URL = 'http://localhost:18899';
+export const CONTRA_GATEWAY_URL = import.meta.env.VITE_CONTRA_GATEWAY_URL || 'http://localhost:8899';
+export const SOLANA_VALIDATOR_URL = import.meta.env.VITE_SOLANA_VALIDATOR_URL || 'http://localhost:18899';
 
 export const ESCROW_PROGRAM_ID = 'GokvZqD2yP696rzNBNbQvcZ4VsLW7jNvFXU1kW9m7k83';
 export const WITHDRAW_PROGRAM_ID = 'J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi';
 
-// Demo token registry — updated by setup script
-export const DEMO_TOKENS: TokenInfo[] = [
-  {
-    mint: '', // Set after running setup-demo.sh
+const KNOWN_TOKEN_OVERRIDES: Record<string, TokenInfo> = {
+  '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': {
+    mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
     symbol: 'USDC',
-    name: 'Demo USDC',
+    name: 'USD Coin (Devnet)',
     decimals: 6,
   },
-  {
-    mint: '', // Set after running setup-demo.sh
+  'So11111111111111111111111111111111111111112': {
+    mint: 'So11111111111111111111111111111111111111112',
     symbol: 'wSOL',
     name: 'Wrapped SOL',
     decimals: 9,
   },
-];
+};
 
-// Load token mints from env if available
-const envMints = (import.meta.env.VITE_DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
-if (envMints.length >= 1 && DEMO_TOKENS[0]) DEMO_TOKENS[0].mint = envMints[0];
-if (envMints.length >= 2 && DEMO_TOKENS[1]) DEMO_TOKENS[1].mint = envMints[1];
+const TOKEN_REGISTRY = new Map<string, TokenInfo>();
+
+function createFallbackTokenInfo(mint: string, decimals = 6): TokenInfo {
+  return {
+    mint,
+    symbol: truncateAddress(mint),
+    name: `SPL Token ${truncateAddress(mint, 6)}`,
+    decimals,
+  };
+}
+
+function seedRegistry() {
+  Object.values(KNOWN_TOKEN_OVERRIDES).forEach(token => {
+    TOKEN_REGISTRY.set(token.mint, token);
+  });
+
+  const envMints = (import.meta.env.VITE_DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
+  envMints.forEach((mint: string) => registerTokenInfo({ mint }));
+}
+
+seedRegistry();
+
+export function registerTokenInfo(token: Partial<TokenInfo> & { mint: string }): TokenInfo {
+  const known = KNOWN_TOKEN_OVERRIDES[token.mint];
+  const existing = TOKEN_REGISTRY.get(token.mint);
+  const fallback = createFallbackTokenInfo(token.mint, token.decimals ?? known?.decimals ?? existing?.decimals ?? 6);
+
+  const next: TokenInfo = {
+    mint: token.mint,
+    symbol: token.symbol || existing?.symbol || known?.symbol || fallback.symbol,
+    name: token.name || existing?.name || known?.name || fallback.name,
+    decimals: token.decimals ?? existing?.decimals ?? known?.decimals ?? fallback.decimals,
+  };
+
+  TOKEN_REGISTRY.set(token.mint, next);
+  return next;
+}
+
+export function registerBalanceTokens(balances: ChannelBalance[]): void {
+  balances.forEach((balance) => {
+    registerTokenInfo({
+      mint: balance.mint,
+      decimals: balance.decimals,
+    });
+  });
+}
+
+export function getAllKnownTokens(): TokenInfo[] {
+  return Array.from(TOKEN_REGISTRY.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
 
 export function getTokenInfo(mint: string): TokenInfo | undefined {
-  return DEMO_TOKENS.find(t => t.mint === mint);
+  return TOKEN_REGISTRY.get(mint);
 }
 
 export function getTokenSymbol(mint: string): string {
   return getTokenInfo(mint)?.symbol || truncateAddress(mint);
+}
+
+export function getTokenName(mint: string): string {
+  return getTokenInfo(mint)?.name || `SPL Token ${truncateAddress(mint, 6)}`;
+}
+
+export function getTokensForMints(mints: string[]): TokenInfo[] {
+  return Array.from(new Set(mints.filter(Boolean))).map((mint) => registerTokenInfo({ mint }));
 }
 
 export function truncateAddress(addr: string, chars = 4): string {
@@ -58,7 +111,6 @@ export function formatUiAmount(amount: number): string {
   }).format(amount);
 }
 
-// Convert human amount (e.g. "1.5") to raw units string based on token decimals
 export function toRawAmount(humanAmount: string, mint: string): string {
   const token = getTokenInfo(mint);
   if (!token) return humanAmount;
@@ -67,14 +119,12 @@ export function toRawAmount(humanAmount: string, mint: string): string {
   return Math.floor(num * Math.pow(10, token.decimals)).toString();
 }
 
-// Convert raw amount string to human-readable number
 export function toHumanAmount(rawAmount: string, mint: string): number {
   const token = getTokenInfo(mint);
   if (!token) return parseFloat(rawAmount);
   return parseFloat(rawAmount) / Math.pow(10, token.decimals);
 }
 
-// Format raw amount to display string with token symbol
 export function formatRawAmount(rawAmount: string, mint: string): string {
   const token = getTokenInfo(mint);
   if (!token) return rawAmount;
@@ -84,7 +134,6 @@ export function formatRawAmount(rawAmount: string, mint: string): string {
 
 export function timeAgo(dateStr: string): string {
   const now = Date.now();
-  // SQLite dates lack timezone — treat as UTC by appending Z if needed
   const normalized = dateStr.endsWith('Z') || dateStr.includes('+') || dateStr.includes('T')
     ? dateStr
     : dateStr.replace(' ', 'T') + 'Z';

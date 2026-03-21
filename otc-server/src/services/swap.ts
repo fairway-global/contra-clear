@@ -11,7 +11,7 @@ import type { Trade } from '../types.js';
 async function accountExistsOnChannel(pubkey: string): Promise<boolean> {
   try {
     const info = await getAccountInfo(GATEWAY_URL, pubkey);
-    return info?.value !== null;
+    return info !== null;
   } catch {
     return false;
   }
