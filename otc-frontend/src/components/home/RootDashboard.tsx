@@ -145,7 +145,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
           <div className="relative mx-auto max-w-5xl text-center">
             <div className="inline-flex items-center gap-2 rounded border border-terminal-accent/30 bg-terminal-accent/5 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.35em] text-terminal-accent">
               <span className="h-1.5 w-1.5 rounded-full bg-terminal-accent animate-pulse" />
-              Built on Contra + Solana
+              Built on Solana + Contra
             </div>
             <h1 className="mt-8 font-mono text-4xl leading-tight text-terminal-text md:text-6xl">
               Private OTC execution

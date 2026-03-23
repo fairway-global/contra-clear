@@ -16,36 +16,48 @@ async function applyAdjustments(balances: ChannelBalance[], adjustments: Map<str
       existing.amount = clamped.toString();
       existing.uiAmount = Number(clamped) / Math.pow(10, existing.decimals);
     } else if (adj > 0n) {
-      const decimals = await getMintDecimals(mint);
-      result.push({ mint, amount: adj.toString(), decimals, uiAmount: Number(adj) / Math.pow(10, decimals) });
+      try {
+        const decimals = await getMintDecimals(mint);
+        result.push({ mint, amount: adj.toString(), decimals, uiAmount: Number(adj) / Math.pow(10, decimals) });
+      } catch {
+        result.push({ mint, amount: adj.toString(), decimals: 6, uiAmount: Number(adj) / 1e6 });
+      }
     }
   }
 
   return result;
 }
 
+async function safeGetChannelBalances(walletAddress: string): Promise<ChannelBalance[]> {
+  try { return await getChannelBalances(walletAddress); } catch { return []; }
+}
+
+async function safeGetOnChainBalances(walletAddress: string): Promise<ChannelBalance[]> {
+  try { return await getOnChainBalances(walletAddress); } catch { return []; }
+}
+
 app.get('/channel/:walletAddress', async (c) => {
   const walletAddress = c.req.param('walletAddress');
-  const balances = await getChannelBalances(walletAddress);
+  const balances = await safeGetChannelBalances(walletAddress);
   const adjustments = getAdjustments(walletAddress);
   return c.json({ balances: await applyAdjustments(balances, adjustments) });
 });
 
 app.get('/onchain/:walletAddress', async (c) => {
   const walletAddress = c.req.param('walletAddress');
-  return c.json({ balances: await getOnChainBalances(walletAddress) });
+  return c.json({ balances: await safeGetOnChainBalances(walletAddress) });
 });
 
 app.get('/:walletAddress', async (c) => {
   const walletAddress = c.req.param('walletAddress');
-  const [channelBalances, onChainBalances] = await Promise.all([
-    getChannelBalances(walletAddress),
-    getOnChainBalances(walletAddress),
+  const [channel, onChain] = await Promise.all([
+    safeGetChannelBalances(walletAddress),
+    safeGetOnChainBalances(walletAddress),
   ]);
   const adjustments = getAdjustments(walletAddress);
   return c.json({
-    channel: await applyAdjustments(channelBalances, adjustments),
-    onChain: onChainBalances,
+    channel: await applyAdjustments(channel, adjustments),
+    onChain,
   });
 });
 

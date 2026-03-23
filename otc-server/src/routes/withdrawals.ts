@@ -17,7 +17,6 @@ app.post('/', async (c) => {
     return c.json({ error: 'walletAddress, tokenMint, and amount are required' }, 400);
   }
 
-  // Check effective balance
   const available = await getEffectiveBalance(walletAddress, tokenMint);
   const requested = BigInt(amount);
 
@@ -35,9 +34,9 @@ app.post('/', async (c) => {
 
     // WithdrawFunds: discriminator(0) + amount(u64 LE) + no destination(0)
     const data = Buffer.alloc(10);
-    data[0] = 0; // discriminator
+    data[0] = 0;
     data.writeBigUInt64LE(BigInt(amount), 1);
-    data[9] = 0; // no destination
+    data[9] = 0;
 
     const ix = new TransactionInstruction({
       keys: [

@@ -1,12 +1,13 @@
 import { getDb } from '../db/store.js';
 import { getChannelBalance, getMintDecimals } from './contra.js';
 
-// Calculate net trade + withdrawal adjustments for a wallet
+// Calculate trade adjustments for a wallet.
+// Only trades need adjustment — they settle at the application level, not on-chain.
+// Deposits and withdrawals are real on-chain operations reflected in the channel balance directly.
 export function getAdjustments(walletAddress: string): Map<string, bigint> {
   const db = getDb();
   const adjustments = new Map<string, bigint>();
 
-  // Trade adjustments
   const trades = db.prepare(
     "SELECT * FROM trades WHERE status = 'completed' AND (party_a = ? OR party_b = ?)"
   ).all(walletAddress, walletAddress) as any[];
@@ -26,20 +27,10 @@ export function getAdjustments(walletAddress: string): Map<string, bigint> {
     }
   }
 
-  // Withdrawal adjustments (confirmed withdrawals reduce balance)
-  const withdrawals = db.prepare(
-    "SELECT * FROM withdrawals WHERE status = 'confirmed' AND wallet_address = ?"
-  ).all(walletAddress) as any[];
-
-  for (const w of withdrawals) {
-    const adj = adjustments.get(w.token_mint) || 0n;
-    adjustments.set(w.token_mint, adj - BigInt(w.amount));
-  }
-
   return adjustments;
 }
 
-// Get effective balance for a specific token (channel + adjustments)
+// Get effective balance = real channel balance + trade adjustments
 export async function getEffectiveBalance(walletAddress: string, tokenMint: string): Promise<bigint> {
   const channelBal = await getChannelBalance(walletAddress, tokenMint);
   const rawChannel = BigInt(channelBal?.amount || '0');

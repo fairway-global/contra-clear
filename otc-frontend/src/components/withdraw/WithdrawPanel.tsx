@@ -4,7 +4,6 @@ import { Connection, Transaction } from '@solana/web3.js';
 import toast from 'react-hot-toast';
 import { buildWithdrawTx, confirmWithdrawal } from '../../lib/api';
 import {
-  CONTRA_GATEWAY_URL,
   formatUiAmount,
   getTokenName,
   getTokenSymbol,
@@ -61,7 +60,9 @@ export default function WithdrawPanel() {
       const signed = await signTransaction(tx);
 
       setStatus('confirming');
-      const connection = new Connection(CONTRA_GATEWAY_URL, 'confirmed');
+      // Send burn to Contra gateway
+      const gatewayUrl = import.meta.env.VITE_CONTRA_GATEWAY_URL;
+      const connection = new Connection(gatewayUrl, 'confirmed');
       const sig = await connection.sendRawTransaction(signed.serialize());
 
       await confirmWithdrawal(withdrawalId, sig);

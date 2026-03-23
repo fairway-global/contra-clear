@@ -51,21 +51,35 @@ async function rpcCall(url: string, method: string, params: any[] = []): Promise
 
 export async function getChannelBalance(walletAddress: string, mint: string): Promise<ChannelBalance | null> {
   try {
-    const balances = await getOwnedTokenBalances(GATEWAY_URL, walletAddress, { mint });
-    return balances.find(balance => balance.mint === mint) || null;
+    // Use direct ATA balance check — gateway doesn't support getTokenAccountsByOwner
+    const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = await import('@solana/spl-token');
+    const { PublicKey } = await import('@solana/web3.js');
+    const ata = await getAssociatedTokenAddress(new PublicKey(mint), new PublicKey(walletAddress), false, TOKEN_PROGRAM_ID);
+    const result = await rpcCall(GATEWAY_URL, 'getTokenAccountBalance', [ata.toString()]);
+    if (result?.value) {
+      return {
+        mint,
+        amount: result.value.amount,
+        decimals: result.value.decimals,
+        uiAmount: parseFloat(result.value.uiAmountString || '0'),
+      };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 export async function getChannelBalances(walletAddress: string, mints?: string[]): Promise<ChannelBalance[]> {
-  if (mints?.length) {
-    const results = await Promise.all(mints.map(mint => getChannelBalance(walletAddress, mint)));
-    return results.filter((b): b is ChannelBalance => b !== null);
-  }
-
-  return getOwnedTokenBalances(GATEWAY_URL, walletAddress);
+  // Gateway doesn't support getTokenAccountsByOwner, so we must check known mints individually
+  const mintsToCheck = mints?.length ? mints : DEMO_MINTS;
+  if (!mintsToCheck.length) return [];
+  const results = await Promise.all(mintsToCheck.map(mint => getChannelBalance(walletAddress, mint)));
+  return results.filter((b): b is ChannelBalance => b !== null);
 }
+
+// Known token mints from env
+const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
 
 export async function getOnChainBalance(walletAddress: string, mint: string): Promise<ChannelBalance | null> {
   try {
