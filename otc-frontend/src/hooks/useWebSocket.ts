@@ -8,12 +8,14 @@ type WSEvent = {
 
 type EventHandler = (event: WSEvent) => void;
 
-const WS_URL = 'ws://localhost:3002';
+const WS_URL = import.meta.env.VITE_WS_URL;
+if (!WS_URL) console.warn('VITE_WS_URL not set — real-time updates disabled.');
 
 let globalWs: WebSocket | null = null;
 const listeners = new Set<EventHandler>();
 
 function ensureConnection() {
+  if (!WS_URL) return;
   if (globalWs && globalWs.readyState === WebSocket.OPEN) return;
   if (globalWs && globalWs.readyState === WebSocket.CONNECTING) return;
 

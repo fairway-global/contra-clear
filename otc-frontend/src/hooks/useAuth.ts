@@ -74,17 +74,13 @@ export function useAuth() {
     }
   }, [publicKey, signMessage]);
 
-  // Auto-login when wallet connects
   useEffect(() => {
-    if (connected && publicKey && signMessage && !authenticated) {
-      login();
-    }
     if (!connected) {
       authToken = null;
       (window as any).__authToken = null;
       setAuthenticated(false);
     }
-  }, [connected, publicKey, signMessage, authenticated, login]);
+  }, [connected]);
 
   return { authenticated, loading, login };
 }

@@ -1,20 +1,9 @@
 import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import * as store from '../db/store.js';
-import { getChannelBalance } from '../services/contra.js';
+import { getChannelBalance, getMintDecimals } from '../services/contra.js';
 import { initiateTrade, submitTradeLeg } from '../services/swap.js';
 import { broadcast } from '../services/ws.js';
-
-// Token decimals lookup
-const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
-const TOKEN_DECIMALS: Record<string, number> = {};
-// First mint is USDC (6 decimals), second is wSOL (9 decimals)
-if (DEMO_MINTS[0]) TOKEN_DECIMALS[DEMO_MINTS[0]] = 6;
-if (DEMO_MINTS[1]) TOKEN_DECIMALS[DEMO_MINTS[1]] = 9;
-
-function getDecimals(mint: string): number {
-  return TOKEN_DECIMALS[mint] ?? 6;
-}
 
 const app = new Hono();
 
@@ -116,8 +105,8 @@ app.post('/:id/quote', async (c) => {
   // sellAmount is raw, so: humanSell = raw / 10^sellDecimals
   // humanBuy = humanSell * price
   // rawBuy = humanBuy * 10^buyDecimals
-  const sellDecimals = getDecimals(rfq.sellToken);
-  const buyDecimals = getDecimals(rfq.buyToken);
+  const sellDecimals = await getMintDecimals(rfq.sellToken);
+  const buyDecimals = await getMintDecimals(rfq.buyToken);
   const humanSellAmount = parseFloat(amount) / Math.pow(10, sellDecimals);
   const humanBuyAmount = humanSellAmount * parseFloat(price);
   const buyAmount = Math.floor(humanBuyAmount * Math.pow(10, buyDecimals)).toString();

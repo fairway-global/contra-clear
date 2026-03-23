@@ -3,7 +3,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { Connection, VersionedTransaction } from '@solana/web3.js';
 import toast from 'react-hot-toast';
 import { getPendingTrades, submitTradeLeg, type PendingTrade } from '../../lib/api';
-import { getTokenSymbol, truncateAddress, CONTRA_GATEWAY_URL } from '../../lib/constants';
+import { CONTRA_GATEWAY_URL, formatRawAmount, getTokenSymbol, truncateAddress } from '../../lib/constants';
 import Panel from '../layout/Panel';
 
 export default function PendingTrades() {
@@ -62,11 +62,11 @@ export default function PendingTrades() {
             <div className="grid grid-cols-2 gap-2 text-xs font-mono mb-3">
               <div>
                 <span className="text-terminal-dim">Sell:</span>{' '}
-                <span className="text-terminal-red">{trade.sellAmount} {getTokenSymbol(trade.sellToken)}</span>
+                <span className="text-terminal-red">{formatRawAmount(trade.sellAmount, trade.sellToken)} {getTokenSymbol(trade.sellToken)}</span>
               </div>
               <div>
                 <span className="text-terminal-dim">Buy:</span>{' '}
-                <span className="text-terminal-green">{trade.buyAmount} {getTokenSymbol(trade.buyToken)}</span>
+                <span className="text-terminal-green">{formatRawAmount(trade.buyAmount, trade.buyToken)} {getTokenSymbol(trade.buyToken)}</span>
               </div>
               <div>
                 <span className="text-terminal-dim">Price:</span> {trade.price}

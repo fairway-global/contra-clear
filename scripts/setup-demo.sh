@@ -14,6 +14,8 @@ set -euo pipefail
 
 VALIDATOR_URL="http://localhost:18899"
 GATEWAY_URL="http://localhost:8899"
+OTC_PORT="${OTC_PORT:-3001}"
+WS_PORT="${WS_PORT:-3002}"
 KEYPAIR_DIR="$(cd "$(dirname "$0")/.." && pwd)/keypairs"
 ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env.demo"
 
@@ -175,7 +177,7 @@ CONTRA_GATEWAY_URL=$GATEWAY_URL
 SOLANA_VALIDATOR_URL=$VALIDATOR_URL
 
 # OTC Server
-OTC_PORT=3001
+OTC_PORT=$OTC_PORT
 
 # Frontend (add these to otc-frontend/.env)
 VITE_DEMO_TOKEN_MINTS=$USDC_MINT,$WSOL_MINT
@@ -188,6 +190,10 @@ echo ""
 
 FRONTEND_ENV="$(cd "$(dirname "$0")/.." && pwd)/otc-frontend/.env"
 cat > "$FRONTEND_ENV" << EOF
+VITE_API_PROXY_TARGET=http://localhost:$OTC_PORT
+VITE_WS_URL=ws://localhost:$WS_PORT
+VITE_CONTRA_GATEWAY_URL=$GATEWAY_URL
+VITE_SOLANA_VALIDATOR_URL=$VALIDATOR_URL
 VITE_DEMO_TOKEN_MINTS=$USDC_MINT,$WSOL_MINT
 EOF
 echo "  Wrote $FRONTEND_ENV"

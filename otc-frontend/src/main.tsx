@@ -6,12 +6,11 @@ import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adap
 import { Toaster } from 'react-hot-toast';
 
 import App from './App';
+import { CONTRA_GATEWAY_URL } from './lib/constants';
 import './styles/globals.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 
-// Use the Contra gateway as the default endpoint for channel operations
-// Users switch to localhost:18899 for on-chain deposits (handled in deposit flow)
-const ENDPOINT = 'http://localhost:8899';
+const ENDPOINT = CONTRA_GATEWAY_URL;
 
 function Root() {
   const wallets = useMemo(() => [
@@ -21,7 +20,7 @@ function Root() {
 
   return (
     <ConnectionProvider endpoint={ENDPOINT}>
-      <WalletProvider wallets={wallets} autoConnect>
+      <WalletProvider wallets={wallets}>
         <WalletModalProvider>
           <App />
           <Toaster

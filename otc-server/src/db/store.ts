@@ -145,6 +145,10 @@ export function getDepositsByWallet(walletAddress: string): DepositRecord[] {
   return getDb().prepare('SELECT * FROM deposits WHERE wallet_address = ? ORDER BY created_at DESC').all(walletAddress).map(mapDeposit);
 }
 
+export function getAllDeposits(limit = 100): DepositRecord[] {
+  return getDb().prepare('SELECT * FROM deposits ORDER BY created_at DESC LIMIT ?').all(limit).map(mapDeposit);
+}
+
 // Withdrawal operations
 export function createWithdrawal(walletAddress: string, tokenMint: string, amount: string): WithdrawalRecord {
   const d = getDb();

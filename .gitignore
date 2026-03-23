@@ -16,7 +16,6 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.sample
-!.env.demo
 
 # Key material
 keypairs/
@@ -73,8 +72,9 @@ coverage-*.lcov
 *.db-wal
 *.db-shm
 
-# Temp scripts
+# Temp scripts and files
 **/create-escrow-instance.mjs
+tmp-*
 
 # Python cache
 **/__pycache__/
@@ -92,3 +92,4 @@ contra/integration/.yellowstone-grpc/
 docker-data/
 *.pid
 contra
+contra/

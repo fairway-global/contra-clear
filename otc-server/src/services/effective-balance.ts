@@ -1,7 +1,5 @@
 import { getDb } from '../db/store.js';
-import { getChannelBalance } from './contra.js';
-
-const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
+import { getChannelBalance, getMintDecimals } from './contra.js';
 
 // Calculate net trade + withdrawal adjustments for a wallet
 export function getAdjustments(walletAddress: string): Map<string, bigint> {
@@ -51,8 +49,6 @@ export async function getEffectiveBalance(walletAddress: string, tokenMint: stri
   return effective < 0n ? 0n : effective;
 }
 
-export function getDecimals(mint: string): number {
-  if (mint === DEMO_MINTS[0]) return 6;
-  if (mint === DEMO_MINTS[1]) return 9;
-  return 6;
+export async function getDecimals(mint: string): Promise<number> {
+  return getMintDecimals(mint);
 }
