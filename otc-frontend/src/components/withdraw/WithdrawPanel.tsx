@@ -68,9 +68,10 @@ export default function WithdrawPanel() {
       await confirmWithdrawal(withdrawalId, sig);
 
       setStatus('done');
-      toast.success('Withdrawal confirmed! Tokens burned on channel. Operator will release from escrow.');
+      toast.success('Withdrawal confirmed! Tokens burned on channel.');
       setAmount('');
-      refresh();
+      // Wait for channel to settle before refreshing
+      setTimeout(() => refresh(), 2000);
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err: any) {
       console.error('Withdrawal failed:', err);

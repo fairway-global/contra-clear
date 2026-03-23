@@ -75,7 +75,7 @@ export default function DepositPanel() {
       setStatus('credited');
       toast.success('Deposit confirmed! Waiting for channel credit...');
       setAmount('');
-      refresh();
+      setTimeout(() => refresh(), 2000);
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err: any) {
       console.error('Deposit failed:', err);
