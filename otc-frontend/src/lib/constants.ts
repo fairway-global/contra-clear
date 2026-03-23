@@ -241,3 +241,13 @@ export function timeAgo(dateStr: string): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
+
+export function getSolscanTxUrl(signature: string): string {
+  const isDevnet = SOLANA_VALIDATOR_URL.includes('devnet');
+  return `https://solscan.io/tx/${signature}${isDevnet ? '?cluster=devnet' : ''}`;
+}
+
+export function getSolscanAccountUrl(address: string): string {
+  const isDevnet = SOLANA_VALIDATOR_URL.includes('devnet');
+  return `https://solscan.io/account/${address}${isDevnet ? '?cluster=devnet' : ''}`;
+}

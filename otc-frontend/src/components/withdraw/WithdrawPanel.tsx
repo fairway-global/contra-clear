@@ -4,11 +4,13 @@ import { Connection, Transaction } from '@solana/web3.js';
 import toast from 'react-hot-toast';
 import { buildWithdrawTx, confirmWithdrawal } from '../../lib/api';
 import {
+  SOLANA_VALIDATOR_URL,
   formatUiAmount,
   getTokenName,
   getTokenSymbol,
   getTokensForMints,
   toRawAmount,
+  getSolscanTxUrl,
 } from '../../lib/constants';
 import Panel from '../layout/Panel';
 import { useBalances } from '../../hooks/useBalances';
@@ -68,9 +70,40 @@ export default function WithdrawPanel() {
       await confirmWithdrawal(withdrawalId, sig);
 
       setStatus('done');
-      toast.success('Withdrawal confirmed! Tokens burned on channel.');
       setAmount('');
-      // Wait for channel to settle before refreshing
+
+      // Show initial toast — then poll for the on-chain release tx
+      const toastId = toast.custom((t) => (
+        <WithdrawToast visible={t.visible} status="pending" />
+      ), { duration: 30000, position: 'bottom-right' });
+
+      // Poll the user's token ATA on devnet for the operator's release tx
+      (async () => {
+        try {
+          const { PublicKey: PK } = await import('@solana/web3.js');
+          const { getAssociatedTokenAddress: getAta, TOKEN_PROGRAM_ID: TPK } = await import('@solana/spl-token');
+          const ata = await getAta(new PK(selectedMint), publicKey!, false, TPK);
+
+          for (let i = 0; i < 15; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const res = await fetch(SOLANA_VALIDATOR_URL, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSignaturesForAddress', params: [ata.toString(), { limit: 1 }] }),
+            });
+            const data = await res.json();
+            const latest = data.result?.[0];
+            if (latest && !latest.err) {
+              toast.custom((t) => (
+                <WithdrawToast visible={t.visible} status="released" releaseTxUrl={getSolscanTxUrl(latest.signature)} />
+              ), { id: toastId, duration: 8000, position: 'bottom-right' });
+              refresh();
+              return;
+            }
+          }
+        } catch {}
+        refresh();
+      })();
+
       setTimeout(() => refresh(), 2000);
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err: any) {
@@ -163,5 +196,51 @@ export default function WithdrawPanel() {
         )}
       </div>
     </Panel>
+  );
+}
+
+function WithdrawToast({ visible, status, releaseTxUrl }: { visible: boolean; status: 'pending' | 'released'; releaseTxUrl?: string }) {
+  return (
+    <div
+      className={`${visible ? 'animate-enter' : 'animate-leave'} pointer-events-auto w-full max-w-sm overflow-hidden rounded-lg shadow-2xl shadow-terminal-accent/10`}
+      style={{ background: 'linear-gradient(135deg, #1a0d28 0%, #111111 50%, #0a1628 100%)', border: '1px solid rgba(0, 255, 209, 0.25)' }}
+    >
+      <div className="px-5 py-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-full ${status === 'released' ? 'bg-terminal-green/20' : 'bg-terminal-accent/20'}`}>
+            {status === 'released' ? (
+              <svg className="h-4 w-4 text-terminal-green" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+            ) : (
+              <div className="h-3 w-3 rounded-full bg-terminal-accent animate-pulse" />
+            )}
+          </div>
+          <div>
+            <div className={`font-mono text-sm font-bold ${status === 'released' ? 'text-terminal-green' : 'text-terminal-accent'}`}>
+              {status === 'released' ? 'Funds Released' : 'Withdrawal Processing'}
+            </div>
+            <div className="font-mono text-[11px] text-terminal-dim">
+              {status === 'released' ? 'Tokens released from escrow to your wallet' : 'Burning on channel... operator releasing from escrow'}
+            </div>
+          </div>
+        </div>
+        {status === 'released' && releaseTxUrl && (
+          <a
+            href={releaseTxUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-md bg-terminal-green/10 px-4 py-2 font-mono text-xs font-semibold text-terminal-green transition-all hover:bg-terminal-green/20"
+          >
+            View Release on Solscan
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+          </a>
+        )}
+        {status === 'pending' && (
+          <div className="flex items-center justify-center gap-2 rounded-md bg-terminal-muted/30 px-4 py-2 font-mono text-[11px] text-terminal-dim">
+            <div className="h-1.5 w-1.5 rounded-full bg-terminal-accent animate-pulse" />
+            Waiting for operator to release from escrow...
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
