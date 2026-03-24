@@ -15,7 +15,7 @@ import WithdrawPanel from './components/withdraw/WithdrawPanel';
 import OTCWorkspace from './components/otc/OTCWorkspace';
 import AdminConsole from './components/admin/AdminConsole';
 import { CONTRA_GATEWAY_URL, SOLANA_VALIDATOR_URL } from './lib/constants';
-import { submitPlatformAccessRequest } from './lib/otc/mockService';
+import { submitPlatformAccessRequest } from './lib/otc/api';
 import type { PlatformAccessRequestInput, User } from './lib/otc/types';
 import { UserRole } from './lib/otc/types';
 
@@ -240,8 +240,8 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/');
     toast.success('Logged out');
   };

@@ -24,7 +24,7 @@ import {
   rejectQuote,
   submitEscrowTxHash,
   submitQuote,
-} from '../../lib/otc/mockService';
+} from '../../lib/otc/api';
 import type { ActivityEvent, EscrowObligation, Quote, RFQ, User } from '../../lib/otc/types';
 import { EscrowStatus, RFQStatus, UserRole } from '../../lib/otc/types';
 
@@ -297,16 +297,16 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     }
   };
 
-  const handleAcceptQuote = async () => {
+  const handleAcceptQuote = async (fillAmount?: string) => {
     if (!currentUser || !selectedRFQ || !activeQuote) {
       return;
     }
 
     setSubmitting(true);
     try {
-      await acceptQuote(selectedRFQ.id, activeQuote.id, currentUser.id);
+      await acceptQuote(selectedRFQ.id, activeQuote.id, currentUser.id, fillAmount);
       setAcceptOpen(false);
-      toast.success('Commercial terms accepted');
+      toast.success(fillAmount ? 'Partial fill accepted' : 'Commercial terms accepted');
       await refreshList();
       await refreshDetail(selectedRFQ.id);
     } finally {
@@ -465,7 +465,7 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
                       setDepositOpen(true);
                     }}
                   >
-                    Record Escrow Deposit
+                    Lock Tokens in Escrow
                   </button>
                 ) : null}
               </>

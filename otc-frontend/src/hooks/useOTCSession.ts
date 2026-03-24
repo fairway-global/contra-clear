@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listUsers } from '../lib/otc/mockService';
+import { listUsers } from '../lib/otc/api';
 import type { User } from '../lib/otc/types';
 import { UserRole } from '../lib/otc/types';
 

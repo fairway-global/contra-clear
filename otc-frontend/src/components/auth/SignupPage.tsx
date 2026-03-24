@@ -20,13 +20,14 @@ export default function SignupPage({
   onNavigateHome,
   onNavigateLogin,
 }: SignupPageProps) {
-  const [form, setForm] = useState<PlatformAccessRequestInput>({
+  const [form, setForm] = useState<PlatformAccessRequestInput & { password: string }>({
     institutionName: '',
     contactName: '',
     email: '',
     institutionType: '',
     jurisdiction: '',
     requestedRoles: [],
+    password: '',
   });
   const [submittedRequest, setSubmittedRequest] = useState<PlatformAccessRequest | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -159,6 +160,20 @@ export default function SignupPage({
               />
             </div>
             <div>
+              <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Password</label>
+              <input
+                type="password"
+                className="input-field"
+                value={form.password}
+                onChange={(event) => setForm((c) => ({ ...c, password: event.target.value }))}
+                placeholder="Min 6 characters"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
               <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Institution Type</label>
               <input
                 className="input-field"
@@ -167,16 +182,15 @@ export default function SignupPage({
                 placeholder="Asset manager, treasury desk, broker, OTC desk"
               />
             </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Jurisdiction</label>
-            <input
-              className="input-field"
-              value={form.jurisdiction}
-              onChange={(event) => handleChange('jurisdiction', event.target.value)}
-              placeholder="Country or regulatory jurisdiction"
-            />
+            <div>
+              <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Jurisdiction</label>
+              <input
+                className="input-field"
+                value={form.jurisdiction}
+                onChange={(event) => handleChange('jurisdiction', event.target.value)}
+                placeholder="Country or regulatory jurisdiction"
+              />
+            </div>
           </div>
 
           <div>
@@ -222,6 +236,8 @@ export default function SignupPage({
                 !form.institutionName ||
                 !form.contactName ||
                 !form.email ||
+                !form.password ||
+                form.password.length < 6 ||
                 !form.institutionType ||
                 !form.jurisdiction ||
                 form.requestedRoles.length === 0

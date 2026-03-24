@@ -10,6 +10,7 @@ import balancesRouter from './routes/balances.js';
 import rfqRouter from './routes/rfq.js';
 import tradesRouter from './routes/trades.js';
 import withdrawalsRouter from './routes/withdrawals.js';
+import otcRouter, { initOtcSchema, seedOtcDemoData } from './routes/otc.js';
 
 import { getAllDeposits, getDb } from './db/store.js';
 import { getSlot, GATEWAY_URL, VALIDATOR_URL } from './services/contra.js';
@@ -54,6 +55,7 @@ app.route('/api/balances', balancesRouter);
 app.route('/api/rfq', rfqRouter);
 app.route('/api/trades', tradesRouter);
 app.route('/api/withdraw', withdrawalsRouter);
+app.route('/api/otc', otcRouter);
 
 // Token decimals for admin display
 const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);
@@ -128,6 +130,8 @@ app.get('/api/admin/withdrawals', (c) => {
 
 // Initialize database
 getDb();
+initOtcSchema();
+seedOtcDemoData();
 
 const PORT = parseInt(process.env.OTC_PORT || '3001');
 const WS_PORT = parseInt(process.env.WS_PORT || '3002');

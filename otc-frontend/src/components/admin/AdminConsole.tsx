@@ -15,7 +15,7 @@ import {
   getNegotiationThread,
   listUsers,
   updateUser,
-} from '../../lib/otc/mockService';
+} from '../../lib/otc/api';
 import type { ActivityEvent, RFQ, User, UserMutationInput } from '../../lib/otc/types';
 import { RFQStatus, UserRole } from '../../lib/otc/types';
 

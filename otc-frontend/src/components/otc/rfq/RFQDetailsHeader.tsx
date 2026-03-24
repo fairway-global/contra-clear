@@ -26,6 +26,16 @@ export default function RFQDetailsHeader({ rfq, action }: RFQDetailsHeaderProps)
             <p className="mt-1 font-mono text-xs text-terminal-dim">
               Base {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenName(rfq.sellToken)} for indicative {formatRawAmount(rfq.indicativeBuyAmount, rfq.buyToken)} {getTokenName(rfq.buyToken)}.
             </p>
+            {rfq.filledAmount && BigInt(rfq.filledAmount) > 0n ? (
+              <p className="mt-1 font-mono text-xs text-terminal-accent">
+                Filled: {formatRawAmount(rfq.filledAmount, rfq.sellToken)} / {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenSymbol(rfq.sellToken)}
+                {BigInt(rfq.filledAmount) < BigInt(rfq.sellAmount) ? (
+                  <span className="ml-2 text-terminal-dim">
+                    (Remaining: {formatRawAmount((BigInt(rfq.sellAmount) - BigInt(rfq.filledAmount)).toString(), rfq.sellToken)})
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="rounded border border-terminal-border bg-terminal-bg px-3 py-2">

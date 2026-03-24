@@ -82,6 +82,7 @@ export interface RFQ {
   selectedProviderId?: string;
   selectedProviderName?: string;
   acceptedPrice?: string;
+  filledAmount?: string;
 }
 
 export interface Quote {

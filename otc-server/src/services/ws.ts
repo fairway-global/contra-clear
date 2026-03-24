@@ -18,7 +18,8 @@ export function startWebSocketServer(port: number) {
 
 // Broadcast an event to all connected clients
 export function broadcast(event: {
-  type: 'rfq_created' | 'rfq_cancelled' | 'quote_submitted' | 'quote_rejected' | 'trade_completed' | 'deposit_credited' | 'withdrawal_confirmed';
+  type: 'rfq_created' | 'rfq_cancelled' | 'quote_submitted' | 'quote_rejected' | 'trade_completed' | 'deposit_credited' | 'withdrawal_confirmed'
+    | 'otc_rfq_created' | 'otc_quote_submitted' | 'otc_quote_countered' | 'otc_quote_accepted' | 'otc_quote_rejected' | 'otc_escrow_submitted';
   data: any;
 }) {
   if (!wss) return;
