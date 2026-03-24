@@ -16,23 +16,24 @@ export const WITHDRAW_PROGRAM_ID = 'J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi
 const JUPITER_TOKEN_SEARCH_URL = 'https://lite-api.jup.ag/tokens/v2/search';
 
 const KNOWN_TOKEN_OVERRIDES: Record<string, TokenInfo> = {
-  '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': {
-    mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-    symbol: 'USDC',
-    name: 'USD Coin (Devnet)',
-    decimals: 6,
-  },
+  // === ContraOTC Devnet Stablecoins (Phantom wallet mints) ===
+  '5L9sUJJHL73YjaJ66MSD1BtNqZo1pgidPtcNKBvVdQ2J': { mint: '5L9sUJJHL73YjaJ66MSD1BtNqZo1pgidPtcNKBvVdQ2J', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+  '7mqJuABCcbrk4UYJJtE4d3GZwR5n2a8BpaSURCq752hu': { mint: '7mqJuABCcbrk4UYJJtE4d3GZwR5n2a8BpaSURCq752hu', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
+  '42k8yVzBkueqEf1cPPhVHxipvUufg5Z9PpV3DRZJxq1h': { mint: '42k8yVzBkueqEf1cPPhVHxipvUufg5Z9PpV3DRZJxq1h', symbol: 'EURC', name: 'Euro Coin', decimals: 6 },
+  '7D3ePHxhAzg1RAoCXwNLvCsgPo91NiVwE2BVm1vX9Loi': { mint: '7D3ePHxhAzg1RAoCXwNLvCsgPo91NiVwE2BVm1vX9Loi', symbol: 'PYUSD', name: 'PayPal USD', decimals: 6 },
+  'azTaDSr4bbhqsxFao8jUH2yz52r1sy5ihKu4XHHBkoE':  { mint: 'azTaDSr4bbhqsxFao8jUH2yz52r1sy5ihKu4XHHBkoE',  symbol: 'USDG', name: 'Global Dollar', decimals: 6 },
+  '7UAwp1VTSJyhuhHF3DQifyebNey9DnCcyADcvmkky4pC': { mint: '7UAwp1VTSJyhuhHF3DQifyebNey9DnCcyADcvmkky4pC', symbol: 'USX', name: 'USX Stablecoin', decimals: 6 },
+  '8sKLVxMHswSVUXwR5sPox8cR4f88z49WtvmYY6J1URGd': { mint: '8sKLVxMHswSVUXwR5sPox8cR4f88z49WtvmYY6J1URGd', symbol: 'CHF', name: 'Swiss Franc Stable', decimals: 6 },
+  '2CMNySecfv9V9kA7LS2VsWzvTv7Kp35Y3jXKGKTH6qv3': { mint: '2CMNySecfv9V9kA7LS2VsWzvTv7Kp35Y3jXKGKTH6qv3', symbol: 'GBP', name: 'British Pound Stable', decimals: 6 },
+  'FnTA78B6wp9i3tZG3NxFXZdd85rQtqzHEwpmwWkbx8PB': { mint: 'FnTA78B6wp9i3tZG3NxFXZdd85rQtqzHEwpmwWkbx8PB', symbol: 'JPY', name: 'Japanese Yen Stable', decimals: 6 },
+  'DnDP4L3mEztefrhq1UedBkGbnhzmeKLxqJ7AYtiawL4f': { mint: 'DnDP4L3mEztefrhq1UedBkGbnhzmeKLxqJ7AYtiawL4f', symbol: 'SGD', name: 'Singapore Dollar Stable', decimals: 6 },
+  'BSCwHCEkNUAgW3uXWEnrgNH2NsSqhiwgmd9dVQLkbshC': { mint: 'BSCwHCEkNUAgW3uXWEnrgNH2NsSqhiwgmd9dVQLkbshC', symbol: 'AED', name: 'UAE Dirham Stable', decimals: 6 },
+  // === Standard tokens ===
   'So11111111111111111111111111111111111111112': {
     mint: 'So11111111111111111111111111111111111111112',
     symbol: 'wSOL',
     name: 'Wrapped SOL',
     decimals: 9,
-  },
-  'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr': {
-    mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr',
-    symbol: 'EURC',
-    name: 'Euro Coin',
-    decimals: 6,
   },
 };
 
