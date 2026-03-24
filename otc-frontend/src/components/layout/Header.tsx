@@ -65,7 +65,7 @@ export default function Header({
           <button type="button" className="flex items-center gap-2 text-left" onClick={() => onNavigate(homePath)}>
             <div className="h-2 w-2 rounded-full bg-terminal-accent animate-pulse" />
             <span className="font-mono text-sm font-bold tracking-wider text-terminal-accent">
-              CONTRA OTC
+              CONTRA CLEAR
             </span>
           </button>
 

@@ -31,7 +31,7 @@ function getFriendlyDepositError(message: string, tokenLabel: string): string {
 
 export default function DepositPanel() {
   const { publicKey, signTransaction } = useWallet();
-  const { onChainBalances, refresh } = useBalances();
+  const { onChainBalances, refresh, adjustBalance } = useBalances();
   const [selectedMint, setSelectedMint] = useState('');
   const [amount, setAmount] = useState('');
   const [status, setStatus] = useState<'idle' | 'building' | 'signing' | 'confirming' | 'credited'>('idle');
@@ -73,6 +73,11 @@ export default function DepositPanel() {
 
       await confirmDeposit(publicKey.toString(), selectedMint, rawAmount, sig);
 
+      // Optimistic: immediately update displayed balances
+      const delta = BigInt(rawAmount);
+      adjustBalance('onChain', selectedMint, -delta);  // left wallet
+      adjustBalance('channel', selectedMint, delta);    // entered channel
+
       setStatus('credited');
       toast.custom((t) => (
         <div
@@ -86,7 +91,7 @@ export default function DepositPanel() {
               </div>
               <div>
                 <div className="font-mono text-sm font-bold text-terminal-green">Deposit Confirmed</div>
-                <div className="font-mono text-[11px] text-terminal-dim">Tokens locked in escrow</div>
+                <div className="font-mono text-[11px] text-terminal-dim">Tokens locked in escrow. Press Refresh to see updated balances.</div>
               </div>
             </div>
             <a
@@ -102,7 +107,6 @@ export default function DepositPanel() {
         </div>
       ), { duration: 6000, position: 'bottom-right' });
       setAmount('');
-      setTimeout(() => refresh(), 2000);
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err: any) {
       console.error('Deposit failed:', err);

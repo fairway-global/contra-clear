@@ -22,6 +22,7 @@ const balanceStore = new Map<string, BalanceSnapshot>();
 const balanceListeners = new Map<string, Set<(snapshot: BalanceSnapshot) => void>>();
 const pollingTimers = new Map<string, number>();
 const subscriberCounts = new Map<string, number>();
+const pollPausedUntil = new Map<string, number>(); // pause polling after optimistic updates
 const inFlightRefreshes = new Map<string, Promise<BalanceSnapshot>>();
 
 function getSnapshot(walletAddress: string | null): BalanceSnapshot {
@@ -47,36 +48,30 @@ async function refreshWalletBalances(walletAddress: string, silent = false): Pro
     return existingRequest;
   }
 
-  const current = getSnapshot(walletAddress);
-  if (!silent) {
-    setSnapshot(walletAddress, {
-      ...current,
-      loading: true,
-    });
-  }
-
   const request = (async () => {
     try {
       const data = await getBalances(walletAddress);
+      const prev = getSnapshot(walletAddress);
+
+      // Only update if we got real data — never replace with empty results
+      const nextChannel = data.channel?.length ? data.channel : prev.channelBalances;
+      const nextOnChain = data.onChain?.length ? data.onChain : prev.onChainBalances;
+
+      registerBalanceTokens(nextChannel);
+      registerBalanceTokens(nextOnChain);
+
       const nextSnapshot: BalanceSnapshot = {
-        channelBalances: data.channel || [],
-        onChainBalances: data.onChain || [],
+        channelBalances: nextChannel,
+        onChainBalances: nextOnChain,
         loading: false,
         lastUpdatedAt: Date.now(),
       };
 
-      registerBalanceTokens(nextSnapshot.channelBalances);
-      registerBalanceTokens(nextSnapshot.onChainBalances);
       setSnapshot(walletAddress, nextSnapshot);
       return nextSnapshot;
     } catch (error) {
       console.error('Failed to fetch balances:', error);
-      const nextSnapshot: BalanceSnapshot = {
-        ...getSnapshot(walletAddress),
-        loading: false,
-      };
-      setSnapshot(walletAddress, nextSnapshot);
-      return nextSnapshot;
+      return getSnapshot(walletAddress);
     } finally {
       inFlightRefreshes.delete(walletAddress);
     }
@@ -96,6 +91,8 @@ function startPolling(walletAddress: string): void {
 
   void refreshWalletBalances(walletAddress);
   const timer = window.setInterval(() => {
+    const pausedUntil = pollPausedUntil.get(walletAddress) || 0;
+    if (Date.now() < pausedUntil) return; // skip poll during optimistic window
     void refreshWalletBalances(walletAddress, true);
   }, 5000);
   pollingTimers.set(walletAddress, timer);
@@ -168,11 +165,44 @@ export function useBalances() {
     return refreshWalletBalances(walletAddress);
   }, [walletAddress]);
 
+  // Optimistically adjust a balance after a successful tx (no RPC call)
+  // Pauses background polling for 15s so stale RPC data doesn't overwrite
+  const adjustBalance = useCallback((
+    source: 'channel' | 'onChain',
+    mint: string,
+    deltaRaw: bigint,
+  ) => {
+    if (!walletAddress) return;
+
+    // Pause polling so stale data doesn't overwrite our optimistic values
+    pollPausedUntil.set(walletAddress, Date.now() + 15000);
+
+    const current = getSnapshot(walletAddress);
+    const list = source === 'channel' ? [...current.channelBalances] : [...current.onChainBalances];
+
+    const idx = list.findIndex(b => b.mint === mint);
+    if (idx >= 0) {
+      const b = { ...list[idx] };
+      const newAmount = BigInt(b.amount) + deltaRaw;
+      const clamped = newAmount < 0n ? 0n : newAmount;
+      b.amount = clamped.toString();
+      b.uiAmount = Number(clamped) / Math.pow(10, b.decimals);
+      list[idx] = b;
+    }
+
+    const next: BalanceSnapshot = {
+      ...current,
+      ...(source === 'channel' ? { channelBalances: list } : { onChainBalances: list }),
+    };
+    setSnapshot(walletAddress, next);
+  }, [walletAddress]);
+
   return {
     channelBalances: snapshot.channelBalances,
     onChainBalances: snapshot.onChainBalances,
     loading: snapshot.loading,
     lastUpdatedAt: snapshot.lastUpdatedAt,
     refresh,
+    adjustBalance,
   };
 }
