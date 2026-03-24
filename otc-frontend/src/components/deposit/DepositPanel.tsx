@@ -101,6 +101,7 @@ export default function DepositPanel() {
               href={getSolscanTxUrl(sig)}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => toast.dismiss(t.id)}
               className="flex items-center justify-center gap-2 rounded-md bg-terminal-accent/10 px-4 py-2 font-mono text-xs font-semibold text-terminal-accent transition-all hover:bg-terminal-accent/20"
             >
               View on Solscan

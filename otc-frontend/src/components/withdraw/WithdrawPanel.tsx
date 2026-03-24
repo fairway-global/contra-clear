@@ -86,20 +86,15 @@ export default function WithdrawPanel() {
 
       await confirmWithdrawal(withdrawalId, sig);
 
-      // Optimistic balance update
-      adjustBalance('channel', mintForTx, -deltaRaw);
-      adjustBalance('onChain', mintForTx, deltaRaw);
-
+      // Don't update balances yet — wait for the on-chain release to be detected
       setStatus('done');
       setAmount('');
 
-      // Show toast with pending state, then poll for operator's release tx
+      // Show pending toast, poll for operator's release, THEN update balances
       const toastId = toast.custom((t) => (
-        <WithdrawToast visible={t.visible} stage="pending" />
+        <WithdrawToast visible={t.visible} stage="pending" onDismiss={() => toast.dismiss(t.id)} />
       ), { duration: 10000, position: 'bottom-right' });
 
-      // Background: poll devnet for the operator's ReleaseFunds tx
-      // Operator typically takes 2-10s: fast polls first, then slow down
       (async () => {
         const ataStr = ata.toString();
         const delays = [1000, 1000, 1500, 1500, 2000, 2000, 2000, 3000, 3000, 3000, 4000, 4000, 5000, 5000, 5000];
@@ -113,20 +108,20 @@ export default function WithdrawPanel() {
             const d = await r.json();
             const latest = d.result?.[0];
             if (latest && !latest.err && latest.signature !== lastKnownSig) {
-              // New tx found — this is the operator's release
+              // Release detected — NOW update balances + show Solscan link
               toast.dismiss(toastId);
+              const releaseToastId = `release-${Date.now()}`;
               toast.custom((t) => (
-                <WithdrawToast visible={t.visible} stage="released" releaseTxSig={latest.signature} />
-              ), { duration: 3000, position: 'bottom-right' });
-              // Now safe to fetch real balances — the release is confirmed on devnet
+                <WithdrawToast visible={t.visible} stage="released" releaseTxSig={latest.signature} onDismiss={() => toast.dismiss(releaseToastId)} />
+              ), { id: releaseToastId, duration: 5000, position: 'bottom-right' });
               refresh();
               return;
             }
           } catch {}
         }
-        // Timeout — refresh anyway and dismiss
-        refresh();
+        // Timeout — refresh anyway
         toast.dismiss(toastId);
+        refresh();
       })();
 
       setTimeout(() => setStatus('idle'), 3000);
@@ -223,7 +218,7 @@ export default function WithdrawPanel() {
   );
 }
 
-function WithdrawToast({ visible, stage, releaseTxSig }: { visible: boolean; stage: 'pending' | 'released'; releaseTxSig?: string }) {
+function WithdrawToast({ visible, stage, releaseTxSig, onDismiss }: { visible: boolean; stage: 'pending' | 'released'; releaseTxSig?: string; onDismiss?: () => void }) {
   const isPending = stage === 'pending';
   return (
     <div
@@ -253,6 +248,7 @@ function WithdrawToast({ visible, stage, releaseTxSig }: { visible: boolean; sta
             href={getSolscanTxUrl(releaseTxSig)}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => onDismiss?.()}
             className="flex items-center justify-center gap-2 rounded-md bg-terminal-green/10 px-4 py-2 font-mono text-xs font-semibold text-terminal-green transition-all hover:bg-terminal-green/20"
           >
             View on Solscan
