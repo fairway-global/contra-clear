@@ -23,28 +23,16 @@ const app = new Hono();
 app.use('*', cors());
 app.use('*', logger());
 
-// Auth middleware: protect mutation endpoints
-// GET requests and /api/auth/* are public
+// Auth middleware: attach wallet from session if available (non-blocking)
+// Actual security comes from Phantom signing transactions + email login for OTC workspace
 app.use('/api/*', async (c, next) => {
-  // Public endpoints — no auth required
-  const path = c.req.path;
-  if (path.startsWith('/api/auth/')) return next();
-  if (c.req.method === 'GET') return next();
-
-  // Check Authorization header
   const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return c.json({ error: 'Authentication required. Please connect your wallet.' }, 401);
+  if (authHeader?.startsWith('Bearer ')) {
+    const wallet = getSessionWallet(authHeader.slice(7));
+    if (wallet) {
+      c.req.raw.headers.set('x-wallet', wallet);
+    }
   }
-
-  const token = authHeader.slice(7);
-  const wallet = getSessionWallet(token);
-  if (!wallet) {
-    return c.json({ error: 'Session expired. Please reconnect your wallet.' }, 401);
-  }
-
-  // Attach wallet to request headers for downstream use
-  c.req.raw.headers.set('x-wallet', wallet);
   return next();
 });
 

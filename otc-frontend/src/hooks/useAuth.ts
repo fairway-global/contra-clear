@@ -2,17 +2,59 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { API_BASE } from '../lib/constants';
 
-let authToken: string | null = null;
+const AUTH_STORAGE_KEY = 'contra_otc_auth';
 
-// Global getter so api.ts can access the token
+// Restore from sessionStorage on load
+let authToken: string | null = null;
+let authWallet: string | null = null;
+
+try {
+  const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (stored) {
+    const parsed = JSON.parse(stored);
+    authToken = parsed.token;
+    authWallet = parsed.wallet;
+    (window as any).__authToken = authToken;
+  }
+} catch {}
+
+function persistAuth(token: string | null, wallet: string | null) {
+  authToken = token;
+  authWallet = wallet;
+  (window as any).__authToken = token;
+  if (token && wallet) {
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, wallet }));
+  } else {
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
 export function getAuthToken(): string | null {
   return authToken;
 }
 
 export function useAuth() {
   const { publicKey, signMessage, connected } = useWallet();
-  const [authenticated, setAuthenticated] = useState(false);
+  const [authenticated, setAuthenticated] = useState(() => {
+    // Restore auth state if wallet matches
+    return Boolean(authToken && authWallet && publicKey && authWallet === publicKey.toString());
+  });
   const [loading, setLoading] = useState(false);
+
+  // On connect: restore session if token matches wallet
+  useEffect(() => {
+    if (!connected || !publicKey) return;
+
+    if (authWallet && authWallet !== publicKey.toString()) {
+      persistAuth(null, null);
+      setAuthenticated(false);
+      return;
+    }
+
+    if (authToken && authWallet === publicKey.toString()) {
+      setAuthenticated(true);
+    }
+  }, [connected, publicKey]);
 
   const login = useCallback(async () => {
     if (!publicKey || !signMessage) return;
@@ -23,7 +65,6 @@ export function useAuth() {
       const messageBytes = new TextEncoder().encode(message);
       const signature = await signMessage(messageBytes);
 
-      // Encode signature as base58
       const bs58chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
       function toBase58(bytes: Uint8Array): string {
         const digits = [0];
@@ -45,29 +86,26 @@ export function useAuth() {
         return str;
       }
 
-      const sigBase58 = toBase58(signature);
-
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           walletAddress: publicKey.toString(),
           message,
-          signature: sigBase58,
+          signature: toBase58(signature),
         }),
       });
 
       const data = await res.json();
       if (data.token) {
-        authToken = data.token;
-        (window as any).__authToken = data.token;
+        persistAuth(data.token, publicKey.toString());
         setAuthenticated(true);
       } else {
         throw new Error(data.error || 'Login failed');
       }
     } catch (err) {
       console.error('Auth failed:', err);
-      authToken = null;
+      persistAuth(null, null);
       setAuthenticated(false);
     } finally {
       setLoading(false);
@@ -76,8 +114,7 @@ export function useAuth() {
 
   useEffect(() => {
     if (!connected) {
-      authToken = null;
-      (window as any).__authToken = null;
+      persistAuth(null, null);
       setAuthenticated(false);
     }
   }, [connected]);

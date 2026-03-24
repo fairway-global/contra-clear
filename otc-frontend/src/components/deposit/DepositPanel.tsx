@@ -56,10 +56,14 @@ export default function DepositPanel() {
   const handleDeposit = async () => {
     if (!publicKey || !signTransaction || !selectedMint || !amount || missingTokenAccount) return;
 
+    // Capture values before any state changes
+    const mintForTx = selectedMint;
+    const rawAmount = toRawAmount(amount, selectedMint);
+    const deltaRaw = BigInt(rawAmount);
+
     try {
       setStatus('building');
-      const rawAmount = toRawAmount(amount, selectedMint);
-      const { transaction: txBase64 } = await buildDepositTx(publicKey.toString(), selectedMint, rawAmount);
+      const { transaction: txBase64 } = await buildDepositTx(publicKey.toString(), mintForTx, rawAmount);
 
       setStatus('signing');
       const txBuffer = Buffer.from(txBase64, 'base64');
@@ -71,12 +75,11 @@ export default function DepositPanel() {
       const sig = await connection.sendRawTransaction(signed.serialize());
       await connection.confirmTransaction(sig, 'confirmed');
 
-      await confirmDeposit(publicKey.toString(), selectedMint, rawAmount, sig);
+      await confirmDeposit(publicKey.toString(), mintForTx, rawAmount, sig);
 
       // Optimistic: immediately update displayed balances
-      const delta = BigInt(rawAmount);
-      adjustBalance('onChain', selectedMint, -delta);  // left wallet
-      adjustBalance('channel', selectedMint, delta);    // entered channel
+      adjustBalance('onChain', mintForTx, -deltaRaw);
+      adjustBalance('channel', mintForTx, deltaRaw);
 
       setStatus('credited');
       toast.custom((t) => (

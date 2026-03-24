@@ -272,14 +272,6 @@ export default function App() {
         />
       );
     }
-    if (!walletAuthorized) {
-      return (
-        <WalletAuthorizationRequired
-          loading={walletAuthLoading}
-          onAuthorize={authorizeWallet}
-        />
-      );
-    }
     return content;
   };
 

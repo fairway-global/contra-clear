@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { Connection, Transaction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import toast from 'react-hot-toast';
 import { buildWithdrawTx, confirmWithdrawal } from '../../lib/api';
 import {
+  SOLANA_VALIDATOR_URL,
   formatUiAmount,
   getTokenName,
   getTokenSymbol,
   getTokensForMints,
+  getSolscanTxUrl,
   toRawAmount,
 } from '../../lib/constants';
 import Panel from '../layout/Panel';
@@ -48,11 +51,28 @@ export default function WithdrawPanel() {
   const handleWithdraw = async () => {
     if (!publicKey || !signTransaction || !selectedMint || !amount) return;
 
+    const mintForTx = selectedMint;
+    const rawAmount = toRawAmount(amount, selectedMint);
+    const deltaRaw = BigInt(rawAmount);
+
     try {
       setStatus('building');
-      const rawAmount = toRawAmount(amount, selectedMint);
+
+      // Snapshot: get the latest tx on the user's ATA BEFORE the burn
+      // so we can detect the operator's new ReleaseFunds tx after
+      const ata = await getAssociatedTokenAddress(new PublicKey(mintForTx), publicKey, false, TOKEN_PROGRAM_ID);
+      let lastKnownSig: string | null = null;
+      try {
+        const r = await fetch(SOLANA_VALIDATOR_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSignaturesForAddress', params: [ata.toString(), { limit: 1 }] }),
+        });
+        const d = await r.json();
+        lastKnownSig = d.result?.[0]?.signature || null;
+      } catch {}
+
       const { withdrawalId, transaction: txBase64 } = await buildWithdrawTx(
-        publicKey.toString(), selectedMint, rawAmount
+        publicKey.toString(), mintForTx, rawAmount
       );
 
       setStatus('signing');
@@ -60,23 +80,55 @@ export default function WithdrawPanel() {
       const signed = await signTransaction(tx);
 
       setStatus('confirming');
-      // Send burn to Contra gateway
       const gatewayUrl = import.meta.env.VITE_CONTRA_GATEWAY_URL;
       const connection = new Connection(gatewayUrl, 'confirmed');
       const sig = await connection.sendRawTransaction(signed.serialize());
 
       await confirmWithdrawal(withdrawalId, sig);
 
-      // Optimistic: immediately update displayed balances
-      const delta = BigInt(toRawAmount(amount, selectedMint));
-      adjustBalance('channel', selectedMint, -delta);   // burned from channel
-      adjustBalance('onChain', selectedMint, delta);     // will arrive in wallet
+      // Optimistic balance update
+      adjustBalance('channel', mintForTx, -deltaRaw);
+      adjustBalance('onChain', mintForTx, deltaRaw);
 
       setStatus('done');
       setAmount('');
-      toast.custom((t) => (
-        <WithdrawToast visible={t.visible} status="released" />
-      ), { duration: 6000, position: 'bottom-right' });
+
+      // Show toast with pending state, then poll for operator's release tx
+      const toastId = toast.custom((t) => (
+        <WithdrawToast visible={t.visible} stage="pending" />
+      ), { duration: 10000, position: 'bottom-right' });
+
+      // Background: poll devnet for the operator's ReleaseFunds tx
+      // Operator typically takes 2-10s: fast polls first, then slow down
+      (async () => {
+        const ataStr = ata.toString();
+        const delays = [1000, 1000, 1500, 1500, 2000, 2000, 2000, 3000, 3000, 3000, 4000, 4000, 5000, 5000, 5000];
+        for (let i = 0; i < delays.length; i++) {
+          await new Promise(r => setTimeout(r, delays[i]));
+          try {
+            const r = await fetch(SOLANA_VALIDATOR_URL, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSignaturesForAddress', params: [ataStr, { limit: 1 }] }),
+            });
+            const d = await r.json();
+            const latest = d.result?.[0];
+            if (latest && !latest.err && latest.signature !== lastKnownSig) {
+              // New tx found — this is the operator's release
+              toast.dismiss(toastId);
+              toast.custom((t) => (
+                <WithdrawToast visible={t.visible} stage="released" releaseTxSig={latest.signature} />
+              ), { duration: 3000, position: 'bottom-right' });
+              // Now safe to fetch real balances — the release is confirmed on devnet
+              refresh();
+              return;
+            }
+          } catch {}
+        }
+        // Timeout — refresh anyway and dismiss
+        refresh();
+        toast.dismiss(toastId);
+      })();
+
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err: any) {
       console.error('Withdrawal failed:', err);
@@ -171,22 +223,48 @@ export default function WithdrawPanel() {
   );
 }
 
-function WithdrawToast({ visible }: { visible: boolean; status?: string }) {
+function WithdrawToast({ visible, stage, releaseTxSig }: { visible: boolean; stage: 'pending' | 'released'; releaseTxSig?: string }) {
+  const isPending = stage === 'pending';
   return (
     <div
       className={`${visible ? 'animate-enter' : 'animate-leave'} pointer-events-auto w-full max-w-sm overflow-hidden rounded-lg shadow-2xl shadow-terminal-accent/10`}
-      style={{ background: 'linear-gradient(135deg, #1a0d28 0%, #111111 50%, #0a1628 100%)', border: '1px solid rgba(0, 255, 209, 0.25)' }}
+      style={{ background: 'linear-gradient(135deg, #1a0d28 0%, #111111 50%, #0a1628 100%)', border: `1px solid ${isPending ? 'rgba(0, 255, 209, 0.25)' : 'rgba(57, 255, 20, 0.3)'}` }}
     >
       <div className="px-5 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-terminal-green/20">
-            <svg className="h-4 w-4 text-terminal-green" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+        <div className="flex items-center gap-3 mb-3">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-full ${isPending ? 'bg-terminal-accent/20' : 'bg-terminal-green/20'}`}>
+            {isPending ? (
+              <div className="h-3 w-3 rounded-full bg-terminal-accent animate-pulse" />
+            ) : (
+              <svg className="h-4 w-4 text-terminal-green" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+            )}
           </div>
           <div>
-            <div className="font-mono text-sm font-bold text-terminal-green">Withdrawal Confirmed</div>
-            <div className="font-mono text-[11px] text-terminal-dim">Tokens burned. Operator releasing to your wallet. Press Refresh to update.</div>
+            <div className={`font-mono text-sm font-bold ${isPending ? 'text-terminal-accent' : 'text-terminal-green'}`}>
+              {isPending ? 'Withdrawal Processing' : 'Funds Released'}
+            </div>
+            <div className="font-mono text-[11px] text-terminal-dim">
+              {isPending ? 'Channel burn confirmed. Waiting for escrow release...' : 'Tokens released from escrow to your wallet'}
+            </div>
           </div>
         </div>
+        {releaseTxSig && (
+          <a
+            href={getSolscanTxUrl(releaseTxSig)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-md bg-terminal-green/10 px-4 py-2 font-mono text-xs font-semibold text-terminal-green transition-all hover:bg-terminal-green/20"
+          >
+            View on Solscan
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+          </a>
+        )}
+        {isPending && (
+          <div className="flex items-center justify-center gap-2 rounded-md bg-terminal-muted/30 px-4 py-2 font-mono text-[11px] text-terminal-dim">
+            <div className="h-1.5 w-1.5 rounded-full bg-terminal-accent animate-pulse" />
+            Detecting operator release transaction...
+          </div>
+        )}
       </div>
     </div>
   );
