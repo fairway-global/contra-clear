@@ -14,6 +14,7 @@ import DepositPanel from './components/deposit/DepositPanel';
 import WithdrawPanel from './components/withdraw/WithdrawPanel';
 import OTCWorkspace from './components/otc/OTCWorkspace';
 import AdminConsole from './components/admin/AdminConsole';
+import KYCVerificationPage from './components/auth/KYCVerificationPage';
 import { CONTRA_GATEWAY_URL, SOLANA_VALIDATOR_URL } from './lib/constants';
 import { submitPlatformAccessRequest } from './lib/otc/api';
 import type { PlatformAccessRequestInput, User } from './lib/otc/types';
@@ -33,7 +34,8 @@ type AppRoute =
   | { kind: 'admin-rfqs'; path: '/admin/rfqs' }
   | { kind: 'admin-users'; path: '/admin/users' }
   | { kind: 'admin-settlements'; path: '/admin/settlements' }
-  | { kind: 'admin-escrow'; path: '/admin/escrow' };
+  | { kind: 'admin-escrow'; path: '/admin/escrow' }
+  | { kind: 'kyc'; path: '/kyc' };
 
 function normalizePathname(pathname: string): string {
   if (!pathname || pathname === '/') {
@@ -90,6 +92,9 @@ function parseRoute(pathname: string): AppRoute {
   }
   if (path === '/admin/escrow') {
     return { kind: 'admin-escrow', path };
+  }
+  if (path === '/kyc') {
+    return { kind: 'kyc', path };
   }
 
   return { kind: 'root', path: '/' };
@@ -212,6 +217,40 @@ export default function App() {
     }
   }, [route.path]);
 
+  const [kycVerified, setKycVerified] = useState<boolean | null>(null);
+
+  // Check KYC status whenever the user changes (try wallet first, then email)
+  useEffect(() => {
+    if (!currentUser || currentUser.role === UserRole.ADMIN) {
+      setKycVerified(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Try wallet first
+        if (publicKey) {
+          const walletRes = await fetch(`/api/otc/kyc/status?wallet=${publicKey.toString()}`);
+          if (walletRes.ok) {
+            const walletData = await walletRes.json();
+            if (walletData.kycStatus === 'verified') {
+              if (!cancelled) setKycVerified(true);
+              return;
+            }
+          }
+        }
+        // Fall back to email
+        const emailRes = await fetch(`/api/otc/kyc/status?email=${encodeURIComponent(currentUser.email)}`);
+        if (!emailRes.ok) { if (!cancelled) setKycVerified(false); return; }
+        const emailData = await emailRes.json();
+        if (!cancelled) setKycVerified(emailData.kycStatus === 'verified');
+      } catch {
+        if (!cancelled) setKycVerified(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentUser, publicKey]);
+
   const handleEmailLogin = async ({ email, password }: { email: string; password: string }) => {
     setLoginSubmitting(true);
     try {
@@ -220,7 +259,26 @@ export default function App() {
       if (user.role === UserRole.ADMIN) {
         navigate('/admin/otc');
       } else {
-        navigate('/otc/rfqs');
+        // Check KYC status — try wallet first, then email
+        let verified = false;
+        try {
+          if (publicKey) {
+            const wr = await fetch(`/api/otc/kyc/status?wallet=${publicKey.toString()}`);
+            if (wr.ok) {
+              const wd = await wr.json();
+              if (wd.kycStatus === 'verified') verified = true;
+            }
+          }
+          if (!verified) {
+            const er = await fetch(`/api/otc/kyc/status?email=${encodeURIComponent(user.email)}`);
+            if (er.ok) {
+              const ed = await er.json();
+              if (ed.kycStatus === 'verified') verified = true;
+            }
+          }
+        } catch { /* fall through */ }
+        setKycVerified(verified);
+        navigate(verified ? '/otc/rfqs' : '/kyc');
       }
     } catch (error: any) {
       toast.error(error.message || 'Email login failed');
@@ -302,6 +360,7 @@ export default function App() {
         onSubmit={handleSignupSubmit}
         onNavigateHome={() => navigate('/')}
         onNavigateLogin={() => navigate('/login')}
+        onNavigateKyc={() => navigate('/kyc')}
       />
     );
   } else if (route.kind === 'deposit') {
@@ -331,6 +390,18 @@ export default function App() {
           body="Sign in with your approved work email to access the OTC workflow, escrow, and settlement tabs assigned to your role."
           onOpenLogin={() => navigate('/login')}
         />
+      );
+    } else if (currentUser?.role !== UserRole.ADMIN && kycVerified === false) {
+      mainContent = (
+        <div className="panel p-8 text-center">
+          <div className="font-mono text-lg text-terminal-text">KYC Verification Required</div>
+          <div className="mt-3 font-mono text-sm leading-7 text-terminal-dim">
+            Complete identity verification before accessing the OTC trading workspace.
+          </div>
+          <button type="button" className="btn-primary mt-6" onClick={() => navigate('/kyc')}>
+            Complete KYC Verification
+          </button>
+        </div>
       );
     } else {
       mainContent = (
@@ -378,6 +449,8 @@ export default function App() {
         onNavigate={navigate}
       />
     );
+  } else if (route.kind === 'kyc') {
+    mainContent = <KYCVerificationPage onNavigate={navigate} />;
   }
 
   return (
@@ -396,7 +469,7 @@ export default function App() {
 
       <footer className="border-t border-terminal-border px-6 py-3 text-xs font-mono text-terminal-dim">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <span>ContraOTC. Institutional OTC infrastructure on Solana.</span>
+          <span>ContraClear. Institutional OTC infrastructure on Solana.</span>
           <span>Gateway: {CONTRA_GATEWAY_URL} | Solana RPC: {SOLANA_VALIDATOR_URL}</span>
         </div>
       </footer>

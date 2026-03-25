@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
     ],
     server: {
       port: 5173,
+      allowedHosts: ['super-ghost-intimate.ngrok-free.app'],
       proxy: {
         '/api': {
           target: apiProxyTarget,

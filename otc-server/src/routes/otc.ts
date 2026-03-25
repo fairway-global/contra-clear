@@ -23,8 +23,14 @@ import {
   otcSubmitQuote,
   otcUpdateUser,
   seedOtcDemoData,
+  registerDID,
+  getKycStatusByWallet,
+  getKycStatusByEmail,
+  processZypheVerification,
+  updateKycAttestation,
 } from '../db/otc-store.js';
 import { broadcast } from '../services/ws.js';
+import { createSASAttestation } from '../services/attestation.js';
 import type { UserRole } from '../db/otc-store.js';
 
 // ── Supabase admin client ─────────────────────────────────────────────────
@@ -302,6 +308,115 @@ otcRouter.get('/admin/rfqs', (c) => {
 
 otcRouter.get('/admin/escrow', (c) => {
   return c.json(otcGetAdminEscrow());
+});
+
+// ── KYC/DID endpoints ─────────────────────────────────────────────────────
+
+otcRouter.post('/kyc/initiate', async (c) => {
+  try {
+    const { walletAddress, jurisdiction } = await c.req.json();
+    if (!walletAddress || !jurisdiction) {
+      return c.json({ error: 'walletAddress and jurisdiction are required' }, 400);
+    }
+
+    // Step 1: Register DID in SQLite
+    const did = registerDID(walletAddress, jurisdiction);
+
+    // Step 2: Create Zyphe verification session
+    const webhookUrl = process.env.ZYPHE_WEBHOOK_URL || 'http://localhost:8085';
+    const sessionRes = await fetch(`${webhookUrl}/api/kyc/create-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress }),
+    });
+
+    if (!sessionRes.ok) {
+      const errBody = await sessionRes.json().catch(() => null) as any;
+      return c.json({ error: `Zyphe session failed: ${errBody?.error || 'unknown'}` }, 500);
+    }
+
+    const sessionData = await sessionRes.json() as any;
+
+    return c.json({
+      success: true,
+      did: did.did,
+      sessionUrl: sessionData.sessionUrl,
+      sessionId: sessionData.sessionId,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+otcRouter.get('/kyc/status', (c) => {
+  const wallet = c.req.query('wallet');
+  const email = c.req.query('email');
+  if (!wallet && !email) {
+    return c.json({ error: 'wallet or email query param is required' }, 400);
+  }
+  const status = wallet ? getKycStatusByWallet(wallet) : getKycStatusByEmail(email!);
+  if (!status) {
+    return c.json({ kycStatus: 'not_found', did: null });
+  }
+  return c.json(status);
+});
+
+// Zyphe webhook forwarded from webhook server
+otcRouter.post('/did/webhook/zyphe', async (c) => {
+  try {
+    const payload = await c.req.json();
+    const { event, data, resultId, custom } = payload;
+
+    const walletAddress =
+      (custom as any)?.customData?.walletAddress ||
+      (custom as any)?.walletAddress ||
+      (data as any)?.dv?.customData?.customData?.walletAddress;
+
+    if (!walletAddress) {
+      return c.json({ success: false, error: 'No walletAddress in webhook' });
+    }
+
+    if (event === 'FAILED' || event === 'failed') {
+      processZypheVerification({ walletAddress, kycStatus: 'rejected', resultId });
+      return c.json({ success: true, message: 'Rejection processed' });
+    }
+
+    if (event !== 'COMPLETED') {
+      return c.json({ success: true, message: 'Event acknowledged' });
+    }
+
+    const kyc = (data as any)?.kyc;
+    const dv = (data as any)?.dv;
+    const status = kyc?.status || dv?.status || 'PASSED';
+    const kycStatus = status === 'PASSED' ? 'verified' : 'rejected';
+
+    const result = processZypheVerification({
+      walletAddress,
+      kycStatus: kycStatus as 'verified' | 'rejected',
+      resultId,
+      identityEmail: dv?.identityEmail || kyc?.identityId,
+      metadata: {
+        flowId: dv?.flowId,
+        documentType: kyc?.documentType,
+      },
+    });
+
+    // If verified, create SAS attestation on-chain
+    if (kycStatus === 'verified') {
+      try {
+        const attestation = await createSASAttestation(walletAddress, result.jurisdiction);
+        updateKycAttestation(walletAddress, attestation.attestationPda, attestation.signature, attestation.expiry);
+        console.log(`SAS attestation created for ${walletAddress}`);
+      } catch (err: any) {
+        console.error('SAS attestation failed (KYC still marked verified):', err.message);
+      }
+    }
+
+    return c.json({ success: true, data: { did: result.did, kycStatus: result.kycStatus } });
+  } catch (err: any) {
+    console.error('Zyphe webhook error:', err.message);
+    return c.json({ success: false, error: 'Processing failed' });
+  }
 });
 
 export default otcRouter;

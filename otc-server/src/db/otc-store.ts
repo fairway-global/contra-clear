@@ -259,6 +259,21 @@ export function initOtcSchema(): void {
       related_quote_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS kyc_dids (
+      id TEXT PRIMARY KEY,
+      did TEXT UNIQUE NOT NULL,
+      wallet_address TEXT UNIQUE NOT NULL,
+      kyc_status TEXT NOT NULL DEFAULT 'pending',
+      jurisdiction TEXT NOT NULL DEFAULT 'XX',
+      kyc_provider TEXT DEFAULT 'zyphe',
+      kyc_data TEXT,
+      attestation_pda TEXT,
+      attestation_tx TEXT,
+      attestation_expiry INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -882,6 +897,118 @@ export function otcGetAdminEscrow(): (OtcEscrow & { rfqReference: string; rfqSta
     rfqReference: row.rfq_reference,
     rfqStatus: row.rfq_status,
   }));
+}
+
+// ── Seed demo data ────────────────────────────────────────────────────────
+
+// ── KYC/DID operations ────────────────────────────────────────────────────
+
+export interface KycDid {
+  id: string;
+  did: string;
+  walletAddress: string;
+  kycStatus: 'pending' | 'verified' | 'rejected' | 'expired';
+  jurisdiction: string;
+  kycProvider: string;
+  kycData: Record<string, unknown> | null;
+  attestationPda: string | null;
+  attestationTx: string | null;
+  attestationExpiry: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapKycDid(row: any): KycDid {
+  return {
+    id: row.id,
+    did: row.did,
+    walletAddress: row.wallet_address,
+    kycStatus: row.kyc_status,
+    jurisdiction: row.jurisdiction,
+    kycProvider: row.kyc_provider || 'zyphe',
+    kycData: row.kyc_data ? JSON.parse(row.kyc_data) : null,
+    attestationPda: row.attestation_pda ?? null,
+    attestationTx: row.attestation_tx ?? null,
+    attestationExpiry: row.attestation_expiry ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function registerDID(walletAddress: string, jurisdiction: string): KycDid {
+  const d = getDb();
+  const existing = d.prepare('SELECT * FROM kyc_dids WHERE wallet_address = ?').get(walletAddress) as any;
+  if (existing) return mapKycDid(existing);
+
+  const id = uuid();
+  const did = `did:contra:devnet:${walletAddress}`;
+  const ts = now();
+  d.prepare(
+    `INSERT INTO kyc_dids (id, did, wallet_address, kyc_status, jurisdiction, kyc_provider, created_at, updated_at)
+     VALUES (?, ?, ?, 'pending', ?, 'zyphe', ?, ?)`
+  ).run(id, did, walletAddress, jurisdiction, ts, ts);
+  return mapKycDid(d.prepare('SELECT * FROM kyc_dids WHERE id = ?').get(id) as any);
+}
+
+export function getKycStatusByWallet(walletAddress: string): { kycStatus: string; did: string; attestationPda: string | null } | null {
+  const d = getDb();
+  const row = d.prepare('SELECT * FROM kyc_dids WHERE wallet_address = ?').get(walletAddress) as any;
+  if (!row) return null;
+  return { kycStatus: row.kyc_status, did: row.did, attestationPda: row.attestation_pda ?? null };
+}
+
+export function getKycStatusByEmail(email: string): { kycStatus: string; did: string; attestationPda: string | null } | null {
+  const d = getDb();
+  // Check if email is stored directly as wallet_address (admin bypass)
+  const byEmail = d.prepare('SELECT * FROM kyc_dids WHERE LOWER(wallet_address) = LOWER(?)').get(email) as any;
+  if (byEmail) return { kycStatus: byEmail.kyc_status, did: byEmail.did, attestationPda: byEmail.attestation_pda ?? null };
+  // Otherwise look up user's wallet from otc_users
+  const user = d.prepare('SELECT * FROM otc_users WHERE LOWER(email) = LOWER(?)').get(email) as any;
+  if (!user) return null;
+  return { kycStatus: 'not_found', did: '', attestationPda: null };
+}
+
+export function processZypheVerification(data: {
+  walletAddress: string;
+  kycStatus: 'verified' | 'rejected';
+  resultId: string;
+  identityEmail?: string;
+  metadata?: Record<string, unknown>;
+}): KycDid {
+  const d = getDb();
+  let row = d.prepare('SELECT * FROM kyc_dids WHERE wallet_address = ?').get(data.walletAddress) as any;
+
+  if (!row) {
+    const id = uuid();
+    const did = `did:contra:devnet:${data.walletAddress}`;
+    const ts = now();
+    d.prepare(
+      `INSERT INTO kyc_dids (id, did, wallet_address, kyc_status, jurisdiction, kyc_provider, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending', 'XX', 'zyphe', ?, ?)`
+    ).run(id, did, data.walletAddress, ts, ts);
+    row = d.prepare('SELECT * FROM kyc_dids WHERE id = ?').get(id) as any;
+  }
+
+  const ts = now();
+  const kycDataJson = JSON.stringify({
+    resultId: data.resultId,
+    identityEmail: data.identityEmail,
+    verifiedAt: ts,
+    ...data.metadata,
+  });
+
+  d.prepare(
+    `UPDATE kyc_dids SET kyc_status = ?, kyc_data = ?, updated_at = ? WHERE wallet_address = ?`
+  ).run(data.kycStatus, kycDataJson, ts, data.walletAddress);
+
+  return mapKycDid(d.prepare('SELECT * FROM kyc_dids WHERE wallet_address = ?').get(data.walletAddress) as any);
+}
+
+export function updateKycAttestation(walletAddress: string, attestationPda: string, attestationTx: string, attestationExpiry: number): void {
+  const d = getDb();
+  d.prepare(
+    `UPDATE kyc_dids SET attestation_pda = ?, attestation_tx = ?, attestation_expiry = ?, updated_at = ? WHERE wallet_address = ?`
+  ).run(attestationPda, attestationTx, attestationExpiry, now(), walletAddress);
 }
 
 // ── Seed demo data ────────────────────────────────────────────────────────

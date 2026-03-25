@@ -71,22 +71,26 @@ export async function logoutUser(): Promise<void> {
 export async function submitPlatformAccessRequest(
   input: PlatformAccessRequestInput,
 ): Promise<PlatformAccessRequest> {
-  // Sign up via Supabase with role in user_metadata
-  const { error } = await supabase.auth.signUp({
-    email: input.email,
-    password: (input as any).password || 'contra123',
-    options: {
-      data: {
-        full_name: input.contactName,
-        role: input.requestedRoles[0] || 'RFQ_ORIGINATOR',
-        institution_name: input.institutionName,
-      },
-    },
+  // Use backend admin API to create user (bypasses Supabase rate limits)
+  const res = await fetch(`${OTC_API_BASE}/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: input.email,
+      password: (input as any).password || 'contra123',
+      contactName: input.contactName,
+      fullName: input.contactName,
+      institutionName: input.institutionName,
+      requestedRoles: input.requestedRoles,
+      role: input.requestedRoles[0] || 'RFQ_ORIGINATOR',
+    }),
   });
-  if (error) throw new Error(error.message);
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Signup failed');
 
   return {
-    id: crypto.randomUUID(),
+    id: data.user?.id || crypto.randomUUID(),
     institutionName: input.institutionName,
     contactName: input.contactName,
     email: input.email,
@@ -94,7 +98,7 @@ export async function submitPlatformAccessRequest(
     jurisdiction: input.jurisdiction,
     requestedRoles: input.requestedRoles,
     status: 'SUBMITTED',
-    createdAt: new Date().toISOString(),
+    createdAt: data.user?.createdAt || new Date().toISOString(),
   };
 }
 
