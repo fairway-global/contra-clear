@@ -83,6 +83,10 @@ export interface RFQ {
   selectedProviderName?: string;
   acceptedPrice?: string;
   filledAmount?: string;
+  settlementLegATx?: string | null;
+  settlementLegBTx?: string | null;
+  settlementLegASig?: string | null;
+  settlementLegBSig?: string | null;
 }
 
 export interface Quote {

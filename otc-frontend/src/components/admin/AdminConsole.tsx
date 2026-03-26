@@ -72,6 +72,18 @@ export default function AdminConsole({ route, currentUser, onUsersChanged }: Adm
     void refresh();
   }, [refresh, route]);
 
+  // WebSocket: auto-refresh on events
+  useEffect(() => {
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:3002';
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = () => { void refresh(); };
+      ws.onclose = () => { setTimeout(() => { /* reconnect handled by remount */ }, 5000); };
+    } catch { /* ignore */ }
+    return () => { if (ws) ws.close(); };
+  }, [refresh]);
+
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) {

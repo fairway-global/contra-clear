@@ -206,6 +206,31 @@ export async function getNegotiationThread(rfqId: string): Promise<ActivityEvent
   return otcFetch<ActivityEvent[]>(`/activity/${rfqId}`);
 }
 
+// ── Settlement ────────────────────────────────────────────────────────────
+
+export async function buildSettlementLegs(rfqId: string): Promise<{ rfqId: string; legATx: string; legBTx: string }> {
+  return otcFetch('/settlement/build', {
+    method: 'POST',
+    body: JSON.stringify({ rfqId }),
+  });
+}
+
+export async function getSettlementInfo(rfqId: string): Promise<{
+  rfqId: string; status: string;
+  legATx: string | null; legBTx: string | null;
+  legASig: string | null; legBSig: string | null;
+  originatorId: string; providerId: string | null;
+}> {
+  return otcFetch(`/settlement/${rfqId}`);
+}
+
+export async function submitSettlementLeg(rfqId: string, leg: 'A' | 'B', signature: string): Promise<{ success: boolean }> {
+  return otcFetch('/settlement/submit-leg', {
+    method: 'POST',
+    body: JSON.stringify({ rfqId, leg, signature }),
+  });
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────
 
 export async function getAdminOverview(): Promise<OTCAdminOverview> {

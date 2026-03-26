@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
 import toast from 'react-hot-toast';
 import Panel from '../layout/Panel';
 import CreateRFQModal from './rfq/CreateRFQModal';
@@ -12,6 +13,7 @@ import DepositEscrowModal from './escrow/DepositEscrowModal';
 import EscrowStatusCard from './escrow/EscrowStatusCard';
 import EscrowTimeline from './escrow/EscrowTimeline';
 import { formatRawAmount, getTokenSymbol, timeAgo, toRawAmount } from '../../lib/constants';
+import { signAndSendToContra } from '../../lib/sendToContra';
 import {
   acceptQuote,
   counterQuote,
@@ -24,6 +26,9 @@ import {
   rejectQuote,
   submitEscrowTxHash,
   submitQuote,
+  buildSettlementLegs,
+  getSettlementInfo,
+  submitSettlementLeg,
 } from '../../lib/otc/api';
 import type { ActivityEvent, EscrowObligation, Quote, RFQ, User } from '../../lib/otc/types';
 import { EscrowStatus, RFQStatus, UserRole } from '../../lib/otc/types';
@@ -82,6 +87,7 @@ function RFQInventory({
 }
 
 export default function OTCWorkspace({ route, rfqId, currentUser, role, onNavigate }: OTCWorkspaceProps) {
+  const { signTransaction } = useWallet();
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -173,6 +179,33 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     setEvents([]);
     setEscrows([]);
   }, [refreshDetail, rfqId, route]);
+
+  // WebSocket: auto-refresh on OTC events
+  useEffect(() => {
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:3002';
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function connect() {
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = () => {
+          // Any OTC event → refresh list and detail
+          void refreshList();
+          if (rfqId) void refreshDetail(rfqId);
+        };
+        ws.onclose = () => {
+          reconnectTimer = setTimeout(connect, 5000);
+        };
+      } catch { /* ignore */ }
+    }
+
+    connect();
+    return () => {
+      if (ws) ws.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, [refreshList, refreshDetail, rfqId]);
 
   const canCreateRFQ = role === UserRole.RFQ_ORIGINATOR;
   const canSubmitQuote = Boolean(
@@ -330,6 +363,42 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     }
   };
 
+  const handleSignSettlement = async () => {
+    if (!currentUser || !selectedRFQ || !signTransaction) return;
+
+    setSubmitting(true);
+    try {
+      // 1. Build settlement legs if not already built
+      const settlement = await buildSettlementLegs(selectedRFQ.id);
+
+      // 2. Determine which leg this user signs
+      const isOriginator = currentUser.id === selectedRFQ.originatorId;
+      const myLegTx = isOriginator ? settlement.legATx : settlement.legBTx;
+      const myLeg: 'A' | 'B' = isOriginator ? 'A' : 'B';
+
+      if (!myLegTx) {
+        toast.error('No settlement transaction available for your role');
+        return;
+      }
+
+      // 3. Sign and send to Contra gateway
+      toast.loading('Sign the settlement transaction in your wallet...', { id: 'settlement' });
+      const signature = await signAndSendToContra(myLegTx, signTransaction);
+      toast.loading('Confirming on Contra channel...', { id: 'settlement' });
+
+      // 4. Record the signed leg on backend
+      await submitSettlementLeg(selectedRFQ.id, myLeg, signature);
+      toast.success('Settlement leg signed and confirmed!', { id: 'settlement' });
+
+      await refreshList();
+      await refreshDetail(selectedRFQ.id);
+    } catch (err: any) {
+      toast.error(err.message || 'Settlement signing failed', { id: 'settlement' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleDepositSubmit = async (txHash: string) => {
     if (!currentUser || !selectedRFQ || !activeEscrow) {
       return;
@@ -466,6 +535,16 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
                     }}
                   >
                     Lock Tokens in Escrow
+                  </button>
+                ) : null}
+                {selectedRFQ.status === RFQStatus.ReadyToSettle && signTransaction ? (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={submitting}
+                    onClick={() => void handleSignSettlement()}
+                  >
+                    {submitting ? 'Signing...' : 'Sign Settlement'}
                   </button>
                 ) : null}
               </>

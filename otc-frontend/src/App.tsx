@@ -346,6 +346,18 @@ export default function App() {
     return content;
   };
 
+  // Show loading while auth is resolving (prevents "please log in" flash)
+  if (authLoading && route.kind !== 'root' && route.kind !== 'login' && route.kind !== 'signup') {
+    return (
+      <div className="min-h-screen bg-terminal-bg flex flex-col">
+        <Header activePath={route.path} currentUser={null} onNavigate={navigate} onOpenLogin={() => {}} onLogout={() => {}} />
+        <main className="flex-1 p-4">
+          <div className="panel p-12 text-center font-mono text-sm text-terminal-dim">Loading...</div>
+        </main>
+      </div>
+    );
+  }
+
   let mainContent: ReactNode = null;
 
   if (route.kind === 'root') {

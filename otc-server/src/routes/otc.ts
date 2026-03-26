@@ -28,9 +28,13 @@ import {
   getKycStatusByEmail,
   processZypheVerification,
   updateKycAttestation,
+  storeSettlementLegs,
+  recordSettlementLegSig,
 } from '../db/otc-store.js';
 import { broadcast } from '../services/ws.js';
 import { createSASAttestation } from '../services/attestation.js';
+import { buildLegATransaction, buildLegBTransaction } from '../services/swap.js';
+import { checkTransactionConfirmed, GATEWAY_URL } from '../services/contra.js';
 import type { UserRole } from '../db/otc-store.js';
 
 // ── Supabase admin client ─────────────────────────────────────────────────
@@ -308,6 +312,114 @@ otcRouter.get('/admin/rfqs', (c) => {
 
 otcRouter.get('/admin/escrow', (c) => {
   return c.json(otcGetAdminEscrow());
+});
+
+// ── Settlement endpoints ──────────────────────────────────────────────────
+
+// Build settlement legs when RFQ reaches ReadyToSettle
+otcRouter.post('/settlement/build', async (c) => {
+  try {
+    const { rfqId } = await c.req.json();
+    const rfq = otcGetRFQ(rfqId);
+
+    if (rfq.status !== 'ReadyToSettle') {
+      return c.json({ error: 'RFQ is not ready for settlement' }, 400);
+    }
+
+    if (rfq.settlementLegATx && rfq.settlementLegBTx) {
+      // Already built
+      return c.json({
+        rfqId,
+        legATx: rfq.settlementLegATx,
+        legBTx: rfq.settlementLegBTx,
+      });
+    }
+
+    // Build swap transactions using Contra channel transfers
+    const trade = {
+      partyA: rfq.originatorId,    // wallet not stored — we need the wallet addresses
+      partyB: rfq.selectedProviderId!,
+      sellToken: rfq.sellToken,
+      sellAmount: rfq.sellAmount,
+      buyToken: rfq.buyToken,
+      buyAmount: rfq.indicativeBuyAmount,
+    };
+
+    // Look up wallet addresses from otc_users
+    const originator = otcGetUser(rfq.originatorId);
+    const provider = otcGetUser(rfq.selectedProviderId!);
+
+    // We need actual wallet addresses — check kyc_dids or use a wallet field
+    // For now, use the user IDs as passed (they should be wallet addresses in the trade context)
+    const legATx = await buildLegATransaction({
+      id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
+      partyA: originator.email, partyB: provider.email, // placeholder — see note below
+      sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
+      buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
+      price: rfq.acceptedPrice || '0', status: 'pending_signatures',
+      legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
+    });
+
+    const legBTx = await buildLegBTransaction({
+      id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
+      partyA: originator.email, partyB: provider.email,
+      sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
+      buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
+      price: rfq.acceptedPrice || '0', status: 'pending_signatures',
+      legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
+    });
+
+    storeSettlementLegs(rfqId, legATx, legBTx);
+
+    return c.json({ rfqId, legATx, legBTx });
+  } catch (err: any) {
+    console.error('Settlement build failed:', err.message);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Get settlement info for an RFQ
+otcRouter.get('/settlement/:rfqId', (c) => {
+  try {
+    const rfq = otcGetRFQ(c.req.param('rfqId'));
+    return c.json({
+      rfqId: rfq.id,
+      status: rfq.status,
+      legATx: rfq.settlementLegATx,
+      legBTx: rfq.settlementLegBTx,
+      legASig: rfq.settlementLegASig,
+      legBSig: rfq.settlementLegBSig,
+      originatorId: rfq.originatorId,
+      providerId: rfq.selectedProviderId,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+// Submit a signed settlement leg
+otcRouter.post('/settlement/submit-leg', async (c) => {
+  try {
+    const { rfqId, leg, signature } = await c.req.json();
+
+    if (!rfqId || !leg || !signature) {
+      return c.json({ error: 'rfqId, leg (A/B), and signature are required' }, 400);
+    }
+
+    // Verify the transaction was confirmed on Contra gateway
+    const confirmed = await checkTransactionConfirmed(GATEWAY_URL, signature, 30, 500);
+    if (!confirmed) {
+      return c.json({ error: 'Transaction not confirmed on Contra channel' }, 400);
+    }
+
+    const rfq = recordSettlementLegSig(rfqId, leg, signature);
+    broadcast({ type: 'otc_escrow_submitted', data: rfq } as any);
+
+    return c.json({ success: true, rfq });
+  } catch (err: any) {
+    console.error('Settlement leg submission failed:', err.message);
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 // ── KYC/DID endpoints ─────────────────────────────────────────────────────

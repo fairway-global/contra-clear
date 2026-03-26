@@ -67,6 +67,10 @@ export interface OtcRFQ {
   selectedProviderName: string | null;
   acceptedPrice: string | null;
   filledAmount: string;
+  settlementLegATx: string | null;
+  settlementLegBTx: string | null;
+  settlementLegASig: string | null;
+  settlementLegBSig: string | null;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
@@ -211,6 +215,10 @@ export function initOtcSchema(): void {
       selected_provider_name TEXT,
       accepted_price TEXT,
       filled_amount TEXT NOT NULL DEFAULT '0',
+      settlement_leg_a_tx TEXT,
+      settlement_leg_b_tx TEXT,
+      settlement_leg_a_sig TEXT,
+      settlement_leg_b_sig TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at TEXT NOT NULL
@@ -356,6 +364,10 @@ function mapRFQ(row: any): OtcRFQ {
     selectedProviderName: row.selected_provider_name ?? null,
     acceptedPrice: row.accepted_price ?? null,
     filledAmount: row.filled_amount || '0',
+    settlementLegATx: row.settlement_leg_a_tx ?? null,
+    settlementLegBTx: row.settlement_leg_b_tx ?? null,
+    settlementLegASig: row.settlement_leg_a_sig ?? null,
+    settlementLegBSig: row.settlement_leg_b_sig ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,
@@ -788,54 +800,20 @@ export function otcSubmitEscrowTxHash(rfqId: string, partyRole: UserRole, actorI
       d.prepare("UPDATE otc_rfqs SET status = 'AwaitingProviderDeposit', updated_at = ? WHERE id = ?").run(ts, rfqId);
     }
 
-    // Check if both parties have deposited
+    // Check if both parties have deposited → lock escrows and prepare for settlement
     const counterStatus = counterpart?.status;
     if (counterStatus === 'CreditedInContra' || counterStatus === 'LockedForSettlement' || counterStatus === 'Released') {
-      // Lock both
+      // Lock both escrows
       d.prepare("UPDATE otc_escrows SET status = 'LockedForSettlement', updated_at = ? WHERE id = ?").run(ts, obligation.id);
       if (counterStatus !== 'Released') {
         d.prepare("UPDATE otc_escrows SET status = 'LockedForSettlement', updated_at = ? WHERE id = ?").run(ts, counterpart.id);
       }
+
+      // Set RFQ to ReadyToSettle — actual settlement requires both parties to sign swap legs
       d.prepare("UPDATE otc_rfqs SET status = 'ReadyToSettle', updated_at = ? WHERE id = ?").run(ts, rfqId);
 
       insertActivity(d, rfqId, 'ESCROW_LOCKED', actor.id, actor.full_name,
-        'Both escrows locked and ready for settlement.');
-
-      // Auto-settle
-      d.prepare("UPDATE otc_rfqs SET status = 'Settling', updated_at = ? WHERE id = ?").run(ts, rfqId);
-      insertActivity(d, rfqId, 'SETTLEMENT_STARTED', actor.id, actor.full_name,
-        'Settlement instruction dispatched.');
-
-      // Release
-      d.prepare("UPDATE otc_escrows SET status = 'Released', updated_at = ? WHERE id = ?").run(ts, obligation.id);
-      if (counterStatus !== 'Released') {
-        d.prepare("UPDATE otc_escrows SET status = 'Released', updated_at = ? WHERE id = ?").run(ts, counterpart.id);
-      }
-
-      // Update filled amount and determine final RFQ status
-      const currentFilled = BigInt(rfq.filled_amount || '0');
-      // Fill amount = originator escrow amount for this settlement
-      const originatorEscrow = partyRole === 'RFQ_ORIGINATOR' ? obligation : counterpart;
-      const fillIncrement = BigInt(originatorEscrow.amount);
-      const newFilled = currentFilled + fillIncrement;
-      const totalSell = BigInt(rfq.sell_amount);
-
-      if (newFilled >= totalSell) {
-        // Fully filled
-        d.prepare("UPDATE otc_rfqs SET status = 'Settled', filled_amount = ?, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
-      } else {
-        // Partial fill: reopen for more quotes
-        d.prepare("UPDATE otc_rfqs SET status = 'OpenForQuotes', filled_amount = ?, selected_quote_id = NULL, selected_provider_id = NULL, selected_provider_name = NULL, accepted_price = NULL, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
-      }
-
-      if (rfq.selected_quote_id) {
-        d.prepare("UPDATE otc_quotes SET status = 'Settled', updated_at = ? WHERE id = ?").run(ts, rfq.selected_quote_id);
-      }
-
-      insertActivity(d, rfqId, 'SETTLEMENT_COMPLETED', actor.id, actor.full_name,
-        newFilled >= totalSell
-          ? 'Settlement completed. Funds released to both counterparties.'
-          : `Partial settlement completed (${newFilled.toString()} of ${totalSell.toString()} filled). RFQ reopened for remaining amount.`);
+        'Both escrows locked. Sign settlement transactions to complete the swap.');
     } else {
       d.prepare("UPDATE otc_rfqs SET updated_at = ? WHERE id = ?").run(ts, rfqId);
     }
@@ -900,6 +878,60 @@ export function otcGetAdminEscrow(): (OtcEscrow & { rfqReference: string; rfqSta
 }
 
 // ── Seed demo data ────────────────────────────────────────────────────────
+
+// ── Settlement operations ─────────────────────────────────────────────────
+
+export function storeSettlementLegs(rfqId: string, legATx: string, legBTx: string): void {
+  const d = getDb();
+  d.prepare(
+    `UPDATE otc_rfqs SET settlement_leg_a_tx = ?, settlement_leg_b_tx = ?, updated_at = ? WHERE id = ?`
+  ).run(legATx, legBTx, now(), rfqId);
+}
+
+export function recordSettlementLegSig(rfqId: string, leg: 'A' | 'B', signature: string): OtcRFQ {
+  const d = getDb();
+  const ts = now();
+  const col = leg === 'A' ? 'settlement_leg_a_sig' : 'settlement_leg_b_sig';
+  d.prepare(`UPDATE otc_rfqs SET ${col} = ?, updated_at = ? WHERE id = ?`).run(signature, ts, rfqId);
+
+  // Check if both legs are now signed → complete settlement
+  const rfq = d.prepare('SELECT * FROM otc_rfqs WHERE id = ?').get(rfqId) as any;
+  if (rfq.settlement_leg_a_sig && rfq.settlement_leg_b_sig) {
+    const txn = d.transaction(() => {
+      d.prepare("UPDATE otc_rfqs SET status = 'Settling', updated_at = ? WHERE id = ?").run(ts, rfqId);
+      insertActivity(d, rfqId, 'SETTLEMENT_STARTED', '', 'System',
+        'Both settlement legs signed. Executing swap on Contra channel.');
+
+      // Release escrows
+      d.prepare("UPDATE otc_escrows SET status = 'Released', updated_at = ? WHERE rfq_id = ?").run(ts, rfqId);
+
+      // Update filled amount
+      const currentFilled = BigInt(rfq.filled_amount || '0');
+      const originatorEscrow = d.prepare("SELECT * FROM otc_escrows WHERE rfq_id = ? AND party_role = 'RFQ_ORIGINATOR'").get(rfqId) as any;
+      const fillIncrement = BigInt(originatorEscrow?.amount || rfq.sell_amount);
+      const newFilled = currentFilled + fillIncrement;
+      const totalSell = BigInt(rfq.sell_amount);
+
+      if (newFilled >= totalSell) {
+        d.prepare("UPDATE otc_rfqs SET status = 'Settled', filled_amount = ?, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
+      } else {
+        d.prepare("UPDATE otc_rfqs SET status = 'OpenForQuotes', filled_amount = ?, selected_quote_id = NULL, selected_provider_id = NULL, selected_provider_name = NULL, accepted_price = NULL, settlement_leg_a_tx = NULL, settlement_leg_b_tx = NULL, settlement_leg_a_sig = NULL, settlement_leg_b_sig = NULL, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
+      }
+
+      if (rfq.selected_quote_id) {
+        d.prepare("UPDATE otc_quotes SET status = 'Settled', updated_at = ? WHERE id = ?").run(ts, rfq.selected_quote_id);
+      }
+
+      insertActivity(d, rfqId, 'SETTLEMENT_COMPLETED', '', 'System',
+        newFilled >= totalSell
+          ? 'Settlement completed. Funds swapped on Contra channel.'
+          : `Partial settlement completed. RFQ reopened for remaining amount.`);
+    });
+    txn();
+  }
+
+  return otcGetRFQ(rfqId);
+}
 
 // ── KYC/DID operations ────────────────────────────────────────────────────
 
