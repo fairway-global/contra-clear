@@ -1,9 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { readAttestation, type SASAttestationResult } from '../../lib/sas/client';
+import type { User } from '../../lib/otc/types';
+import { UserRole } from '../../lib/otc/types';
+
+interface SASAttestationResult {
+  exists: boolean;
+  attestationPda: string;
+  data: { accreditationLevel: string; jurisdiction: string; complianceTier: number; provider: string; isAccredited: boolean } | null;
+  signer: string | null;
+  expiry: number | null;
+  expired: boolean;
+}
 
 type KYCStep = 'idle' | 'initiating' | 'awaiting_zyphe' | 'polling' | 'attesting' | 'complete';
+type VerificationType = 'kyc' | 'kyb';
 type Jurisdiction = 'CH' | 'US' | 'EU' | 'UK' | 'SG' | 'AE' | 'HK';
 
 const JURISDICTIONS: { code: Jurisdiction; name: string }[] = [
@@ -21,11 +32,17 @@ const MAX_POLL_ATTEMPTS = 120;
 
 interface KYCVerificationPageProps {
   onNavigate: (path: string) => void;
+  currentUser?: User | null;
+  authLoading?: boolean;
+  forceType?: VerificationType;
 }
 
-export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageProps) {
+export default function KYCVerificationPage({ onNavigate, currentUser, authLoading, forceType }: KYCVerificationPageProps) {
   const { publicKey } = useWallet();
   const wallet = publicKey?.toString() || '';
+  const isInstitution = forceType === 'kyb' || currentUser?.role === UserRole.LIQUIDITY_PROVIDER;
+  const vType: VerificationType = forceType || (isInstitution ? 'kyb' : 'kyc');
+  const vLabel = isInstitution ? 'KYB' : 'KYC';
 
   const [attestation, setAttestation] = useState<SASAttestationResult | null>(null);
   const [checking, setChecking] = useState(false);
@@ -40,6 +57,18 @@ export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageP
     if (!wallet) return;
     setChecking(true);
     try {
+      // First check backend DB — only read on-chain if backend says verified
+      const statusRes = await fetch(`/api/otc/kyc/status?wallet=${wallet}`);
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.kycStatus !== 'verified') {
+          setAttestation(null);
+          setChecking(false);
+          return;
+        }
+      }
+      // Backend says verified — now read on-chain attestation for display
+      const { readAttestation } = await import('../../lib/sas/client');
       const result = await readAttestation(wallet);
       setAttestation(result);
     } catch {
@@ -98,7 +127,7 @@ export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageP
       const res = await fetch('/api/otc/kyc/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: wallet, jurisdiction }),
+        body: JSON.stringify({ walletAddress: wallet, jurisdiction, type: vType }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -118,20 +147,29 @@ export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageP
 
   const isVerified = attestation?.exists && attestation.data && !attestation.expired;
 
+  // Wait for auth to resolve before rendering (prevents KYC→KYB flicker)
+  if (authLoading) {
+    return (
+      <div className="panel p-8 text-center">
+        <div className="font-mono text-sm text-terminal-dim">Loading...</div>
+      </div>
+    );
+  }
+
   // ── Right panel content ─────────────────────────────────────────────────
 
   const rightPanel = (
     <div className="panel overflow-hidden">
       <div className="border-b border-terminal-border px-6 py-5">
         <div className="font-mono text-xs uppercase tracking-[0.35em] text-terminal-accent">How It Works</div>
-        <h2 className="mt-3 font-mono text-2xl text-terminal-text">KYC Verification Flow</h2>
+        <h2 className="mt-3 font-mono text-2xl text-terminal-text">{vLabel} Verification Flow</h2>
       </div>
       <div className="space-y-4 px-6 py-6">
         {[
           { step: '1', title: 'Select Jurisdiction', desc: 'Choose your regulatory region to determine compliance tier and accreditation level.' },
-          { step: '2', title: 'Zyphe KYC Verification', desc: 'Complete document upload and biometric verification through Zyphe in a secure window.' },
+          { step: '2', title: `Zyphe ${vLabel} Verification`, desc: isInstitution ? 'Submit company documents and complete business verification through Zyphe.' : 'Complete document upload and biometric verification through Zyphe.' },
           { step: '3', title: 'SAS On-Chain Attestation', desc: 'Once verified, an immutable attestation is written to Solana via the Solana Attestation Service.' },
-          { step: '4', title: 'OTC Access Unlocked', desc: 'Your verified identity enables trading, escrow, and settlement on the Contra OTC platform.' },
+          { step: '4', title: 'OTC Access Unlocked', desc: 'Your verified identity enables trading, escrow, and settlement on the ContraClear OTC platform.' },
         ].map((s, i) => (
           <div key={s.step} className="rounded border border-terminal-border bg-terminal-bg p-4">
             <div className="flex items-start gap-3">
@@ -178,7 +216,34 @@ export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageP
     );
   }
 
-  // ── Verified ────────────────────────────────────────────────────────────
+  // ── Verified (on-chain attestation found OR kycStep completed) ──────────
+
+  if (kycStep === 'complete' || (isVerified && attestation?.data)) {
+    // Refresh kycVerified in parent so OTC routes unlock
+    if (kycStep === 'complete' && !attestation?.data) {
+      return (
+        <div className="mx-auto grid max-w-6xl gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+          <div className="panel overflow-hidden">
+            <div className="border-b border-terminal-border px-6 py-5">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-terminal-green" />
+                <span className="font-mono text-xs uppercase tracking-[0.35em] text-terminal-green">{vLabel} Verified</span>
+              </div>
+              <h1 className="mt-3 font-mono text-2xl text-terminal-text">Verification Complete</h1>
+              <p className="mt-3 font-mono text-sm text-terminal-dim">
+                Your {isInstitution ? 'institution' : 'identity'} has been verified. You can now access the OTC trading platform.
+              </p>
+            </div>
+            <div className="px-6 py-6 flex flex-wrap gap-3">
+              <button type="button" className="btn-primary" onClick={() => { window.location.href = '/otc/rfqs'; }}>Go To OTC Trading</button>
+              <button type="button" className="btn-secondary" onClick={() => onNavigate('/')}>Back To Home</button>
+            </div>
+          </div>
+          {rightPanel}
+        </div>
+      );
+    }
+  }
 
   if (isVerified && attestation?.data) {
     const d = attestation.data;
@@ -297,10 +362,10 @@ export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageP
     <div className="mx-auto grid max-w-6xl gap-4 xl:grid-cols-[1.02fr_0.98fr]">
       <div className="panel overflow-hidden">
         <div className="border-b border-terminal-border px-6 py-5">
-          <div className="font-mono text-xs uppercase tracking-[0.35em] text-terminal-accent">Identity Verification</div>
-          <h1 className="mt-3 font-mono text-3xl text-terminal-text">Verify your identity</h1>
+          <div className="font-mono text-xs uppercase tracking-[0.35em] text-terminal-accent">{isInstitution ? 'Institution Verification' : 'Identity Verification'}</div>
+          <h1 className="mt-3 font-mono text-3xl text-terminal-text">{isInstitution ? 'Verify your institution' : 'Verify your identity'}</h1>
           <p className="mt-4 font-mono text-sm leading-7 text-terminal-dim">
-            Complete KYC verification through Zyphe. Your wallet address will be attested on Solana via the Solana Attestation Service.
+            {isInstitution ? 'Complete KYB verification through Zyphe. Your institution will be attested on Solana via the Solana Attestation Service.' : 'Complete KYC verification through Zyphe. Your wallet address will be attested on Solana via the Solana Attestation Service.'}
           </p>
         </div>
 
@@ -350,7 +415,7 @@ export default function KYCVerificationPage({ onNavigate }: KYCVerificationPageP
             className="btn-primary w-full py-3"
             onClick={() => void handleInitiateKYC()}
           >
-            Start KYC Verification
+            {`Start ${vLabel} Verification`}
           </button>
 
           <p className="font-mono text-[9px] text-terminal-dim text-center">

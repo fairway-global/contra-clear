@@ -38,8 +38,12 @@ export function useEmailRoleAuth() {
     try {
       const { data: { session: supaSession } } = await supabase.auth.getSession();
       if (!supaSession) {
-        setUsers([]);
-        setSession(null);
+        // Only clear if we previously had a session (avoid clearing on public pages)
+        if (session) {
+          setUsers([]);
+          setSession(null);
+        }
+        setLoading(false);
         return [];
       }
       const nextUsers = await listUsers(true);

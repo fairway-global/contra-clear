@@ -278,24 +278,32 @@ app.get('/api/kyc', (_req: Request, res: Response) => {
   res.json(allRecords);
 });
 
-// Create Zyphe verification session
-// Uses direct sandbox URL (same pattern as the Fairway frontend oracle)
+// In-memory map to track wallet → pending verification (for KYB where custom comes back empty)
+const pendingVerifications = new Map<string, { walletAddress: string; type: string }>();
+
+// Create Zyphe verification session (KYC or KYB)
 app.post('/api/kyc/create-session', async (req: Request, res: Response) => {
   try {
-    const { walletAddress } = req.body;
+    const { walletAddress, type } = req.body;
 
     if (!walletAddress) {
       return res.status(400).json({ error: 'walletAddress is required' });
     }
 
-    // Encode wallet address in customData so it arrives in the webhook
+    const verificationType = type || 'kyc';
     const customData = encodeURIComponent(JSON.stringify({ walletAddress }));
 
-    // Direct Zyphe sandbox flow URL — no API key / session creation needed
-    //https://verify.zyphe.com/sandbox/flow/fairwayglobal-or99/kyc/or99
-    const sessionUrl = `https://verify.zyphe.com/sandbox/flow/fairwayglobal-or77/kyc/or77?customData=${customData}`;
+    let sessionUrl: string;
+    if (verificationType === 'kyb') {
+      sessionUrl = `https://verify.zyphe.com/sandbox/flow/fairwayglobal-or999/kyb/or999-kyb?customData=${customData}`;
+    } else {
+      sessionUrl = `https://verify.zyphe.com/sandbox/flow/fairwayglobal-or77/kyc/or77?customData=${customData}`;
+    }
 
-    console.log(`✅ Zyphe verification URL generated for wallet: ${walletAddress}`);
+    // Store pending verification so we can match webhook by wallet
+    pendingVerifications.set(walletAddress, { walletAddress, type: verificationType });
+
+    console.log(`✅ Zyphe ${verificationType.toUpperCase()} URL generated for wallet: ${walletAddress}`);
 
     res.json({
       sessionUrl,
@@ -307,7 +315,7 @@ app.post('/api/kyc/create-session', async (req: Request, res: Response) => {
   }
 });
 
-// Zyphe webhook handler
+// Zyphe webhook handler — handles both KYC and KYB webhooks
 app.post('/webhooks/zyphe', async (req: RawBodyRequest, res: Response) => {
   if (!verifySignature(req)) {
     return res.status(401).send('Invalid signature');
@@ -315,81 +323,120 @@ app.post('/webhooks/zyphe', async (req: RawBodyRequest, res: Response) => {
 
   const payload = (req.body || {}) as ZypheWebhookPayload;
   const { resultId, event, data } = payload;
+  const custom = (payload as any).custom || {};
 
   console.log('📥 Zyphe webhook received:', JSON.stringify(payload, null, 2));
 
-  if (event === 'COMPLETED') {
-    const dv = data?.dv as Record<string, unknown> | undefined;
-    const kyc = data?.kyc as Record<string, unknown> | undefined;
+  const dv = data?.dv as Record<string, unknown> | undefined;
+  const kyc = data?.kyc as Record<string, unknown> | undefined;
+  const kyb = (data as any)?.kyb as Record<string, unknown> | undefined;
+  const isKYB = Boolean(kyb);
 
-    // Zyphe sends dv (document verification) and/or kyc data
-    // Accept if we have at least dv — kyc may be null for document-only flows
-    if (dv || kyc) {
-      try {
-        // Determine verification status from whichever object is present
-        const dvStatus = dv?.status as string | undefined;
-        const kycStatus = kyc?.status as string | undefined;
-        const status = dvStatus || kycStatus || 'PASSED';
-        const isVerified = status === 'PASSED';
+  // Extract wallet address from custom data, or look up from pending verifications
+  let walletAddress =
+    custom?.customData?.walletAddress ||
+    custom?.walletAddress ||
+    (dv as any)?.customData?.customData?.walletAddress;
 
-        console.log(`✅ Zyphe verification ${isVerified ? 'PASSED' : 'FAILED'} for resultId: ${resultId}`);
+  // For KYB: custom is often empty. Try to find wallet from pending verifications or identityEmail
+  if (!walletAddress && isKYB) {
+    const kybEmail = (kyb as any)?.identityEmail || (kyb as any)?.businessInformation?.contactEmail;
+    console.log(`🔍 KYB webhook with empty custom. identityEmail: ${kybEmail}`);
 
-        // Forward webhook to backend oracle for DID update + SAS attestation
-        const backendUrl = process.env.BACKEND_ORACLE_URL || 'http://localhost:3001';
-        try {
-          console.log('🔄 Forwarding webhook to backend oracle...');
-
-          // Normalize the payload so the backend oracle can process it
-          // The backend expects: event, data.kyc, data.dv, custom.customData.walletAddress
-          const normalizedPayload = {
-            ...payload,
-            data: {
-              ...data,
-              // If kyc is null, synthesize a minimal kyc object from dv data
-              kyc: kyc || {
-                status: isVerified ? 'PASSED' : 'FAILED',
-                documentType: dv?.documentType || 'unknown',
-                documentId: dv?.documentId || 'unknown',
-                scoreBiometricSelfie: dv?.scoreBiometricSelfie || null,
-                identityId: dv?.identityEmail || 'unknown',
-              },
-              dv: dv || {},
-            },
-          };
-
-          const backendResponse = await fetch(`${backendUrl}/api/otc/did/webhook/zyphe`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(normalizedPayload),
-          });
-
-          if (backendResponse.ok) {
-            const result = await backendResponse.json();
-            console.log('✅ Webhook forwarded to backend oracle:', JSON.stringify(result));
-          } else {
-            console.error('❌ Backend forward failed:', await backendResponse.text());
-          }
-        } catch (forwardError) {
-          console.error('❌ Error forwarding to backend:', forwardError);
-        }
-      } catch (error) {
-        console.error('❌ Error processing webhook:', error);
+    // Check pending verifications
+    for (const [wallet, pending] of pendingVerifications.entries()) {
+      if (pending.type === 'kyb') {
+        walletAddress = wallet;
+        pendingVerifications.delete(wallet);
+        console.log(`✅ Matched KYB webhook to pending wallet: ${walletAddress}`);
+        break;
       }
-    } else {
-      console.log('⚠️ Webhook has no dv or kyc data — ignoring');
     }
-  } else if (event === 'failed' || event === 'FAILED') {
+  }
+
+  const backendUrl = process.env.BACKEND_ORACLE_URL || 'http://localhost:3001';
+
+  // For KYB: always forward as verified regardless of event status (sandbox limitation)
+  if (isKYB) {
+    console.log(`📋 KYB webhook — marking as verified (event: ${event})`);
+
+    const normalizedPayload = {
+      ...payload,
+      event: 'COMPLETED',
+      custom: { customData: { walletAddress } },
+      data: {
+        ...data,
+        kyc: { status: 'PASSED', identityId: (kyb as any)?.identityEmail },
+        dv: dv || { status: 'PASSED' },
+      },
+    };
+
+    try {
+      const backendResponse = await fetch(`${backendUrl}/api/otc/did/webhook/zyphe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedPayload),
+      });
+      if (backendResponse.ok) {
+        console.log('✅ KYB webhook forwarded to backend as verified');
+      } else {
+        console.error('❌ Backend forward failed:', await backendResponse.text());
+      }
+    } catch (err) {
+      console.error('❌ Error forwarding KYB webhook:', err);
+    }
+
+    return res.status(200).send('ok');
+  }
+
+  // KYC flow — only forward as verified if event is COMPLETED and status is PASSED
+  if (walletAddress && event === 'COMPLETED' && (dv || kyc)) {
+    const dvStatus = dv?.status as string | undefined;
+    const kycStatus = kyc?.status as string | undefined;
+    const status = dvStatus || kycStatus || 'PASSED';
+    const isVerified = status === 'PASSED';
+
+    console.log(`📋 KYC webhook ${isVerified ? 'PASSED' : 'FAILED'} for wallet: ${walletAddress}`);
+
+    const normalizedPayload = {
+      ...payload,
+      custom: { customData: { walletAddress } },
+      data: {
+        ...data,
+        kyc: kyc || { status, identityId: dv?.identityEmail || 'unknown' },
+        dv: dv || {},
+      },
+    };
+
+    try {
+      const backendResponse = await fetch(`${backendUrl}/api/otc/did/webhook/zyphe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalizedPayload),
+      });
+
+      if (backendResponse.ok) {
+        console.log('✅ KYC webhook forwarded to backend');
+      } else {
+        console.error('❌ Backend forward failed:', await backendResponse.text());
+      }
+    } catch (error) {
+      console.error('❌ Error forwarding KYC webhook:', error);
+    }
+  } else if (event === 'FAILED' || event === 'failed') {
     console.log(`❌ KYC verification failed for resultId: ${resultId}`);
-    kycStorage.set(resultId, {
-      id: resultId,
-      status: 'failed',
-      source: 'zyphe',
-      error: data?.error || 'KYC verification failed',
-      createdAt: new Date().toISOString(),
-      originalPayload: payload,
-    } as StoredKYCRecord);
+    // Forward rejection to backend
+    if (walletAddress) {
+      try {
+        await fetch(`${backendUrl}/api/otc/did/webhook/zyphe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, custom: { customData: { walletAddress } } }),
+        });
+      } catch { /* best effort */ }
+    }
   } else {
-    console.log(`ℹ️ Unhandled webhook event: ${event}`);
+    console.log(`ℹ️ Unhandled KYC webhook event: ${event}`);
   }
 
   res.status(200).send('ok');

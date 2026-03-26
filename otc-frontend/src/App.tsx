@@ -35,7 +35,8 @@ type AppRoute =
   | { kind: 'admin-users'; path: '/admin/users' }
   | { kind: 'admin-settlements'; path: '/admin/settlements' }
   | { kind: 'admin-escrow'; path: '/admin/escrow' }
-  | { kind: 'kyc'; path: '/kyc' };
+  | { kind: 'kyc'; path: '/kyc' }
+  | { kind: 'kyb'; path: '/kyb' };
 
 function normalizePathname(pathname: string): string {
   if (!pathname || pathname === '/') {
@@ -95,6 +96,9 @@ function parseRoute(pathname: string): AppRoute {
   }
   if (path === '/kyc') {
     return { kind: 'kyc', path };
+  }
+  if (path === '/kyb') {
+    return { kind: 'kyb', path };
   }
 
   return { kind: 'root', path: '/' };
@@ -176,6 +180,7 @@ function RoleRestricted({
 export default function App() {
   const { publicKey } = useWallet();
   const {
+    loading: authLoading,
     users,
     currentUser,
     authenticated,
@@ -278,7 +283,11 @@ export default function App() {
           }
         } catch { /* fall through */ }
         setKycVerified(verified);
-        navigate(verified ? '/otc/rfqs' : '/kyc');
+        if (verified) {
+          navigate('/otc/rfqs');
+        } else {
+          navigate(user.role === UserRole.LIQUIDITY_PROVIDER ? '/kyb' : '/kyc');
+        }
       }
     } catch (error: any) {
       toast.error(error.message || 'Email login failed');
@@ -291,7 +300,11 @@ export default function App() {
     setSignupSubmitting(true);
     try {
       const request = await submitPlatformAccessRequest(payload);
-      toast.success('Access request submitted');
+      // Auto-sign in after signup
+      const password = (payload as any).password || 'contra123';
+      const user = await loginByEmail(payload.email, password);
+      toast.success(`Signed up and signed in as ${user.fullName}`);
+      navigate(user.role === UserRole.LIQUIDITY_PROVIDER ? '/kyb' : '/kyc');
       return request;
     } finally {
       setSignupSubmitting(false);
@@ -346,7 +359,6 @@ export default function App() {
   } else if (route.kind === 'login') {
     mainContent = (
       <LoginPage
-        users={users}
         submitting={loginSubmitting}
         onSubmit={handleEmailLogin}
         onNavigateHome={() => navigate('/')}
@@ -398,8 +410,8 @@ export default function App() {
           <div className="mt-3 font-mono text-sm leading-7 text-terminal-dim">
             Complete identity verification before accessing the OTC trading workspace.
           </div>
-          <button type="button" className="btn-primary mt-6" onClick={() => navigate('/kyc')}>
-            Complete KYC Verification
+          <button type="button" className="btn-primary mt-6" onClick={() => navigate(currentUser?.role === UserRole.LIQUIDITY_PROVIDER ? '/kyb' : '/kyc')}>
+            {currentUser?.role === UserRole.LIQUIDITY_PROVIDER ? 'Complete KYB Verification' : 'Complete KYC Verification'}
           </button>
         </div>
       );
@@ -449,8 +461,8 @@ export default function App() {
         onNavigate={navigate}
       />
     );
-  } else if (route.kind === 'kyc') {
-    mainContent = <KYCVerificationPage onNavigate={navigate} />;
+  } else if (route.kind === 'kyc' || route.kind === 'kyb') {
+    mainContent = <KYCVerificationPage onNavigate={navigate} currentUser={currentUser} authLoading={authLoading} forceType={route.kind === 'kyb' ? 'kyb' : undefined} />;
   }
 
   return (

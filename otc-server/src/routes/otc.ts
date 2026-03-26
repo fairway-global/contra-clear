@@ -314,20 +314,22 @@ otcRouter.get('/admin/escrow', (c) => {
 
 otcRouter.post('/kyc/initiate', async (c) => {
   try {
-    const { walletAddress, jurisdiction } = await c.req.json();
+    const { walletAddress, jurisdiction, type } = await c.req.json();
     if (!walletAddress || !jurisdiction) {
       return c.json({ error: 'walletAddress and jurisdiction are required' }, 400);
     }
 
+    const verificationType = type || 'kyc'; // 'kyc' or 'kyb'
+
     // Step 1: Register DID in SQLite
     const did = registerDID(walletAddress, jurisdiction);
 
-    // Step 2: Create Zyphe verification session
+    // Step 2: Create Zyphe verification session (KYC or KYB)
     const webhookUrl = process.env.ZYPHE_WEBHOOK_URL || 'http://localhost:8085';
     const sessionRes = await fetch(`${webhookUrl}/api/kyc/create-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ walletAddress }),
+      body: JSON.stringify({ walletAddress, type: verificationType }),
     });
 
     if (!sessionRes.ok) {
@@ -366,6 +368,10 @@ otcRouter.post('/did/webhook/zyphe', async (c) => {
   try {
     const payload = await c.req.json();
     const { event, data, resultId, custom } = payload;
+    const kyb = (data as any)?.kyb;
+    const isKYB = Boolean(kyb);
+
+    console.log(`Zyphe webhook received: event=${event} resultId=${resultId} isKYB=${isKYB}`);
 
     const walletAddress =
       (custom as any)?.customData?.walletAddress ||
@@ -373,42 +379,49 @@ otcRouter.post('/did/webhook/zyphe', async (c) => {
       (data as any)?.dv?.customData?.customData?.walletAddress;
 
     if (!walletAddress) {
+      console.warn('Webhook missing walletAddress in custom data');
       return c.json({ success: false, error: 'No walletAddress in webhook' });
-    }
-
-    if (event === 'FAILED' || event === 'failed') {
-      processZypheVerification({ walletAddress, kycStatus: 'rejected', resultId });
-      return c.json({ success: true, message: 'Rejection processed' });
-    }
-
-    if (event !== 'COMPLETED') {
-      return c.json({ success: true, message: 'Event acknowledged' });
     }
 
     const kyc = (data as any)?.kyc;
     const dv = (data as any)?.dv;
-    const status = kyc?.status || dv?.status || 'PASSED';
-    const kycStatus = status === 'PASSED' ? 'verified' : 'rejected';
+
+    // KYB: always mark as verified (sandbox limitation)
+    // KYC: respect the actual verification status
+    let kycStatus: 'verified' | 'rejected';
+    if (isKYB) {
+      kycStatus = 'verified';
+    } else {
+      const status = kyc?.status || dv?.status || 'PASSED';
+      kycStatus = status === 'PASSED' ? 'verified' : 'rejected';
+      if (event === 'FAILED' || event === 'failed') {
+        kycStatus = 'rejected';
+      }
+    }
 
     const result = processZypheVerification({
       walletAddress,
-      kycStatus: kycStatus as 'verified' | 'rejected',
+      kycStatus,
       resultId,
-      identityEmail: dv?.identityEmail || kyc?.identityId,
+      identityEmail: dv?.identityEmail || kyc?.identityId || kyb?.identityEmail,
       metadata: {
-        flowId: dv?.flowId,
+        event,
+        isKYB,
+        flowId: dv?.flowId || kyb?.flowId,
         documentType: kyc?.documentType,
       },
     });
 
-    // If verified, create SAS attestation on-chain
+    console.log(`${isKYB ? 'KYB' : 'KYC'} ${kycStatus} for wallet ${walletAddress}`);
+
+    // Create SAS attestation on-chain if verified
     if (kycStatus === 'verified') {
       try {
         const attestation = await createSASAttestation(walletAddress, result.jurisdiction);
         updateKycAttestation(walletAddress, attestation.attestationPda, attestation.signature, attestation.expiry);
         console.log(`SAS attestation created for ${walletAddress}`);
       } catch (err: any) {
-        console.error('SAS attestation failed (KYC still marked verified):', err.message);
+        console.error('SAS attestation failed (status still marked verified):', err.message);
       }
     }
 

@@ -42,7 +42,10 @@ async function otcFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   });
 
   if (res.status === 401) {
-    await supabase.auth.signOut();
+    // Only sign out if we had a token (avoid clearing state on unauthenticated pages)
+    if (token) {
+      await supabase.auth.signOut();
+    }
     throw new Error('Session expired. Please sign in again.');
   }
 
