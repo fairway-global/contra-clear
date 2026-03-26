@@ -20,7 +20,7 @@ export default function TradeHistory() {
             <span>Side</span>
             <span className="text-right">Sold</span>
             <span className="text-right">Received</span>
-            <span>Counterparty</span>
+            <span>Participant</span>
             <span className="text-right">Time</span>
           </div>
           {trades.map(trade => {

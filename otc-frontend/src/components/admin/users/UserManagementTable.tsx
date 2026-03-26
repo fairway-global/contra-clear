@@ -40,7 +40,7 @@ export default function UserManagementTable({
           <select className="select-field md:w-56" value={roleFilter} onChange={(event) => onRoleFilterChange(event.target.value as typeof roleFilter)}>
             <option value="ALL">All Roles</option>
             <option value="RFQ_ORIGINATOR">RFQ Originators</option>
-            <option value="LIQUIDITY_PROVIDER">Liquidity Providers</option>
+            <option value="LIQUIDITY_PROVIDER">Approved Traders</option>
           </select>
         </div>
         <div className="font-mono text-xs text-terminal-dim">{users.length} user records</div>

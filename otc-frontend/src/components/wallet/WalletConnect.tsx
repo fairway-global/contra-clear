@@ -14,7 +14,7 @@ export default function WalletConnect() {
           <h1 className="font-mono text-2xl font-bold tracking-wider text-terminal-accent">CONTRA OTC</h1>
         </div>
         <p className="font-mono text-sm text-terminal-dim max-w-md">
-          Institutional OTC spot trading desk built on Contra — private execution infrastructure for Solana.
+          Private OTC spot trading desk built on Contra — trusted-institution execution infrastructure for Solana.
         </p>
         <p className="font-mono text-xs text-terminal-dim">
           Connect your wallet to start trading.

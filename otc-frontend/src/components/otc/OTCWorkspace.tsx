@@ -351,7 +351,7 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     return (
       <Panel title="OTC Access">
         <div className="py-12 text-center font-mono text-sm text-terminal-dim">
-          Sign in as an RFQ Originator or Liquidity Provider to access the OTC workflow.
+          Sign in as an RFQ Originator or Approved Trader to access the OTC workflow.
         </div>
       </Panel>
     );

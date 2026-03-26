@@ -209,7 +209,7 @@ export interface PlatformAccessRequest extends PlatformAccessRequestInput {
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   [UserRole.RFQ_ORIGINATOR]: 'RFQ Originator',
-  [UserRole.LIQUIDITY_PROVIDER]: 'Liquidity Provider',
+  [UserRole.LIQUIDITY_PROVIDER]: 'Approved Trader',
   [UserRole.ADMIN]: 'Admin',
 };
 

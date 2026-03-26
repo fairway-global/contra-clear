@@ -74,11 +74,11 @@ export default function SignupPage({
           <div className="border-b border-terminal-border px-6 py-5">
             <div className="font-mono text-xs uppercase tracking-[0.35em] text-terminal-accent">Access Request Submitted</div>
             <h1 className="mt-3 font-mono text-3xl text-terminal-text">
-              {isInstitution ? 'Institutional onboarding request received' : 'KYC verification request received'}
+              {isInstitution ? 'Approved trader onboarding request received' : 'KYC verification request received'}
             </h1>
             <p className="mt-4 max-w-2xl font-mono text-sm leading-7 text-terminal-dim">
               {isInstitution
-                ? 'Your institution profile has been submitted for review. The next step is compliance verification before platform access is enabled.'
+                ? 'Your profile and host institution details were submitted for review. Compliance verification is required before platform access is enabled.'
                 : 'Your account request has been submitted. Complete KYC verification to activate your access.'}
             </p>
           </div>
@@ -87,11 +87,11 @@ export default function SignupPage({
             <div className="rounded border border-terminal-border bg-terminal-bg p-4 font-mono text-xs leading-6 text-terminal-dim">
               {isInstitution ? (
                 <>
-                  <div><span className="text-terminal-text">Institution:</span> {submittedRequest.institutionName}</div>
+                  <div><span className="text-terminal-text">Host Institution:</span> {submittedRequest.institutionName}</div>
                   <div><span className="text-terminal-text">Primary Contact:</span> {submittedRequest.contactName}</div>
                   <div><span className="text-terminal-text">Work Email:</span> {submittedRequest.email}</div>
                   <div><span className="text-terminal-text">Jurisdiction:</span> {submittedRequest.jurisdiction}</div>
-                  <div><span className="text-terminal-text">Institution Type:</span> {submittedRequest.institutionType}</div>
+                  <div><span className="text-terminal-text">Host Institution Type:</span> {submittedRequest.institutionType}</div>
                 </>
               ) : (
                 <>
@@ -142,26 +142,26 @@ export default function SignupPage({
 
   // ── Header text based on selected role ────────────────────────────────
 
-  const headerLabel = isInstitution ? 'Institutional Signup' : selectedRole ? 'KYC Signup' : 'Platform Signup';
+  const headerLabel = isInstitution ? 'Approved Trader Signup' : selectedRole ? 'KYC Signup' : 'Platform Signup';
   const headerTitle = isInstitution
-    ? 'Register your institution on the OTC platform'
+    ? 'Register as an approved trader'
     : selectedRole
       ? 'Create your OTC trading account'
       : 'Request access to the OTC platform';
   const headerDescription = isInstitution
-    ? 'Submit your institutional profile for onboarding. Once approved, your institution can respond to RFQs, negotiate terms, and manage escrow obligations as a liquidity provider.'
+    ? 'Submit your profile and affiliated host institution details for onboarding. Once approved, you can respond to RFQs, negotiate terms, and manage escrow obligations on behalf of your institution.'
     : selectedRole
-      ? 'Create an account to start placing private RFQs, reviewing quotes from liquidity providers, and managing escrow settlement.'
-      : 'Select your account type below to get started. KYC users create and manage RFQs, while institutions provide liquidity.';
+      ? 'Create an account to start placing private RFQs, reviewing quotes from approved traders, and managing escrow settlement.'
+      : 'Select your account type below to get started. RFQ creators initiate requests, while approved traders quote on behalf of trusted host institutions.';
 
   // ── Right panel text based on selected role ───────────────────────────
 
-  const rightPanelTitle = isInstitution ? 'Institutional onboarding' : selectedRole ? 'KYC onboarding' : 'What happens after you submit';
+  const rightPanelTitle = isInstitution ? 'Approved trader onboarding' : selectedRole ? 'KYC onboarding' : 'What happens after you submit';
   const rightPanelItems = isInstitution
     ? [
-        'Your institution profile is queued for review and the requested roles are evaluated by the platform team.',
-        'Once approved, your work email is activated and the login page will route you to the liquidity provider workspace.',
-        'KYB is the next mandatory step after submission. The verification button will be active once the review process is in place.',
+        'Your profile and host institution details are queued for review and role approval by the platform team.',
+        'Once approved, your work email is activated and the login page routes you to the approved trader workspace.',
+        'KYC/KYB checks are mandatory before trading permissions are enabled.',
       ]
     : selectedRole
       ? [
@@ -206,12 +206,12 @@ export default function SignupPage({
                     }`}
                   >
                     <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">
-                      {isOriginator ? 'KYC User' : 'Institution'}
+                      {isOriginator ? 'RFQ Creator' : 'Approved Trader'}
                     </div>
                     <div className="mt-3 font-mono text-xs leading-6 text-terminal-dim">
                       {isOriginator
-                        ? 'Individual or entity that creates private RFQs, reviews quotes, and tracks escrow settlement.'
-                        : 'Liquidity provider that responds to eligible RFQs, negotiates terms, and fulfills escrow obligations.'}
+                        ? 'Participant that creates private RFQs, reviews quotes, and tracks escrow settlement.'
+                        : 'Approved, licensed trader who responds to eligible RFQs, negotiates terms, and fulfills escrow obligations on behalf of a trusted host institution.'}
                     </div>
                   </button>
                 );
@@ -225,7 +225,7 @@ export default function SignupPage({
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">
-                    {isInstitution ? 'Institution Name' : 'Full Name'}
+                    {isInstitution ? 'Host Institution Name' : 'Full Name'}
                   </label>
                   <input
                     className="input-field"
@@ -237,7 +237,7 @@ export default function SignupPage({
                         handleChange('contactName', event.target.value);
                       }
                     }}
-                    placeholder={isInstitution ? 'Institution legal name' : 'Your full name'}
+                    placeholder={isInstitution ? 'Host institution legal name' : 'Your full name'}
                   />
                 </div>
                 <div>
@@ -268,7 +268,7 @@ export default function SignupPage({
                       className="input-field"
                       value={form.email}
                       onChange={(event) => handleChange('email', event.target.value)}
-                      placeholder="name@institution.com"
+                      placeholder="name@organization.com"
                       autoComplete="email"
                     />
                   </div>
@@ -290,12 +290,12 @@ export default function SignupPage({
               {isInstitution ? (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Institution Type</label>
+                    <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Host Institution Type</label>
                     <input
                       className="input-field"
                       value={form.institutionType}
                       onChange={(event) => handleChange('institutionType', event.target.value)}
-                      placeholder="Asset manager, treasury desk, broker, OTC desk"
+                      placeholder="OTC desk, market maker, broker, treasury desk"
                     />
                   </div>
                   <div>
@@ -350,7 +350,7 @@ export default function SignupPage({
               }
               onClick={() => void handleSubmit()}
             >
-              {submitting ? 'Submitting...' : isInstitution ? 'Submit Institutional Access Request' : 'Create Account'}
+              {submitting ? 'Submitting...' : isInstitution ? 'Submit Approved Trader Access Request' : 'Create Account'}
             </button>
             <button type="button" className="btn-secondary" onClick={onNavigateLogin}>
               Back To Sign In
@@ -365,7 +365,7 @@ export default function SignupPage({
       <div className="panel overflow-hidden">
         <div className="border-b border-terminal-border px-6 py-5">
           <div className="font-mono text-xs uppercase tracking-[0.35em] text-terminal-accent">
-            {isInstitution ? 'Institutional Onboarding' : selectedRole ? 'KYC Onboarding' : 'Onboarding Scope'}
+            {isInstitution ? 'Approved Trader Onboarding' : selectedRole ? 'KYC Onboarding' : 'Onboarding Scope'}
           </div>
           <h2 className="mt-3 font-mono text-2xl text-terminal-text">{rightPanelTitle}</h2>
         </div>
