@@ -15,6 +15,7 @@ import WithdrawPanel from './components/withdraw/WithdrawPanel';
 import OTCWorkspace from './components/otc/OTCWorkspace';
 import AdminConsole from './components/admin/AdminConsole';
 import KYCVerificationPage from './components/auth/KYCVerificationPage';
+import FaucetPage from './components/faucet/FaucetPage';
 import { CONTRA_GATEWAY_URL, SOLANA_VALIDATOR_URL } from './lib/constants';
 import { submitPlatformAccessRequest } from './lib/otc/api';
 import type { PlatformAccessRequestInput, User } from './lib/otc/types';
@@ -36,7 +37,8 @@ type AppRoute =
   | { kind: 'admin-settlements'; path: '/admin/settlements' }
   | { kind: 'admin-escrow'; path: '/admin/escrow' }
   | { kind: 'kyc'; path: '/kyc' }
-  | { kind: 'kyb'; path: '/kyb' };
+  | { kind: 'kyb'; path: '/kyb' }
+  | { kind: 'faucet'; path: '/faucet' };
 
 function normalizePathname(pathname: string): string {
   if (!pathname || pathname === '/') {
@@ -99,6 +101,9 @@ function parseRoute(pathname: string): AppRoute {
   }
   if (path === '/kyb') {
     return { kind: 'kyb', path };
+  }
+  if (path === '/faucet') {
+    return { kind: 'faucet', path };
   }
 
   return { kind: 'root', path: '/' };
@@ -473,6 +478,8 @@ export default function App() {
         onNavigate={navigate}
       />
     );
+  } else if (route.kind === 'faucet') {
+    mainContent = <FaucetPage />;
   } else if (route.kind === 'kyc' || route.kind === 'kyb') {
     mainContent = <KYCVerificationPage onNavigate={navigate} currentUser={currentUser} authLoading={authLoading} forceType={route.kind === 'kyb' ? 'kyb' : undefined} />;
   }
