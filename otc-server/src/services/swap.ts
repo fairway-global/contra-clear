@@ -8,18 +8,20 @@ import { getLatestBlockhash, checkTransactionConfirmed, getAccountInfo, GATEWAY_
 import * as store from '../db/store.js';
 import type { Trade } from '../types.js';
 
-async function accountExistsOnChannel(ata: string): Promise<boolean> {
+async function getChannelTokenBalance(ata: string): Promise<{ exists: boolean; amount: bigint }> {
   try {
-    // Use getTokenAccountBalance — the gateway supports this but may not support getAccountInfo
     const response = await fetch(GATEWAY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountBalance', params: [ata] }),
     });
     const json = await response.json();
-    return json.result?.value !== undefined && json.result?.value !== null;
+    if (json.result?.value) {
+      return { exists: true, amount: BigInt(json.result.value.amount) };
+    }
+    return { exists: false, amount: 0n };
   } catch {
-    return false;
+    return { exists: false, amount: 0n };
   }
 }
 
@@ -34,15 +36,21 @@ export async function buildTransferInstructions(
 
   const instructions: TransactionInstruction[] = [];
 
-  // Both ATAs must exist on the channel (created during deposit by the operator)
-  const fromAtaExists = await accountExistsOnChannel(fromAta.toString());
-  if (!fromAtaExists) {
-    throw new Error(`Sender has no channel balance for this token. Deposit first.`);
+  // Verify sender has sufficient balance on the channel
+  const fromBalance = await getChannelTokenBalance(fromAta.toString());
+  if (!fromBalance.exists) {
+    throw new Error(`Sender has no channel balance for this token. Deposit to Contra first.`);
+  }
+  if (fromBalance.amount < amount) {
+    const has = Number(fromBalance.amount) / 1e6;
+    const needs = Number(amount) / 1e6;
+    throw new Error(`Insufficient channel balance: has ${has}, needs ${needs}. Deposit more to Contra first.`);
   }
 
-  const toAtaExists = await accountExistsOnChannel(toAta.toString());
-  if (!toAtaExists) {
-    throw new Error(`Receiver has no channel account for this token. They must deposit first.`);
+  // Verify receiver has a token account on the channel
+  const toBalance = await getChannelTokenBalance(toAta.toString());
+  if (!toBalance.exists) {
+    throw new Error(`Receiver has no channel account for this token. They must deposit to Contra first.`);
   }
 
   instructions.push(

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
 import ModalShell from '../../layout/ModalShell';
 import TokenIcon from '../../ui/TokenIcon';
 import { getAllKnownTokens, getTokenName, getTokenSymbol } from '../../../lib/constants';
+import { useBalances } from '../../../hooks/useBalances';
 
 interface CreateRFQModalProps {
   open: boolean;
@@ -27,6 +29,8 @@ const EXPIRY_OPTIONS = [
 ];
 
 export default function CreateRFQModal({ open, submitting, onClose, onSubmit }: CreateRFQModalProps) {
+  const { publicKey } = useWallet();
+  const { channelBalances, onChainBalances } = useBalances();
   const tokens = useMemo(() => getAllKnownTokens(), [open]);
   const [sellToken, setSellToken] = useState('');
   const [buyToken, setBuyToken] = useState('');
@@ -67,6 +71,11 @@ export default function CreateRFQModal({ open, submitting, onClose, onSubmit }: 
   const sellSymbol = getTokenSymbol(sellToken) || 'Token';
   const buySymbol = getTokenSymbol(buyToken) || 'Token';
 
+  const sellChannelBal = channelBalances.find(b => b.mint === sellToken)?.uiAmount ?? 0;
+  const sellOnChainBal = onChainBalances.find(b => b.mint === sellToken)?.uiAmount ?? 0;
+  const sellTotalBal = sellChannelBal + sellOnChainBal;
+  const exceedsBalance = sellAmount && Number(sellAmount) > sellTotalBal;
+
   return (
     <ModalShell
       open={open}
@@ -82,7 +91,7 @@ export default function CreateRFQModal({ open, submitting, onClose, onSubmit }: 
             disabled={
               !sellToken || !buyToken || !sellAmount || !indicativeBuyAmount ||
               sellToken === buyToken || Number(sellAmount) <= 0 || Number(indicativeBuyAmount) <= 0 ||
-              submitting
+              Boolean(exceedsBalance) || submitting
             }
             onClick={() => void handleSubmit()}
           >
@@ -118,9 +127,21 @@ export default function CreateRFQModal({ open, submitting, onClose, onSubmit }: 
               onChange={(e) => setSellAmount(e.target.value)}
             />
           </div>
-          <div className="mt-1 text-right font-mono text-[10px] text-terminal-dim">
-            {getTokenName(sellToken)}
+          <div className="mt-1 flex justify-between font-mono text-[10px]">
+            <span className={exceedsBalance ? 'text-terminal-red' : 'text-terminal-dim'}>
+              Available: {sellChannelBal.toFixed(2)} (Contra) + {sellOnChainBal.toFixed(2)} (on-chain) = {sellTotalBal.toFixed(2)} {sellSymbol}
+            </span>
+            {sellTotalBal > 0 && (
+              <button type="button" className="text-terminal-accent hover:underline" onClick={() => setSellAmount(sellTotalBal.toString())}>
+                MAX
+              </button>
+            )}
           </div>
+          {exceedsBalance && (
+            <div className="mt-1 font-mono text-[10px] text-terminal-red">
+              Amount exceeds your total available balance
+            </div>
+          )}
         </div>
 
         {/* Swap arrow */}

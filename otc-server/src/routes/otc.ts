@@ -369,6 +369,29 @@ otcRouter.post('/settlement/build', async (c) => {
       return c.json({ error: 'Both parties must register their wallet addresses first. Connect your wallet and try again.' }, 400);
     }
 
+    // Validate Contra channel balances before building settlement
+    const { getChannelBalance } = await import('../services/contra.js');
+
+    const originatorBalance = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
+    const sellAmountRaw = BigInt(rfq.sellAmount);
+    if (!originatorBalance || BigInt(originatorBalance.amount) < sellAmountRaw) {
+      const has = originatorBalance ? originatorBalance.uiAmount : 0;
+      const needs = Number(sellAmountRaw) / 1e6;
+      return c.json({
+        error: `Originator has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.sellToken.slice(0,8)}... Deposit to Contra first.`
+      }, 400);
+    }
+
+    const providerBalance = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
+    const buyAmountRaw = BigInt(rfq.indicativeBuyAmount);
+    if (!providerBalance || BigInt(providerBalance.amount) < buyAmountRaw) {
+      const has = providerBalance ? providerBalance.uiAmount : 0;
+      const needs = Number(buyAmountRaw) / 1e6;
+      return c.json({
+        error: `Liquidity provider has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.buyToken.slice(0,8)}... Deposit to Contra first.`
+      }, 400);
+    }
+
     const trade = {
       id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
       partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
@@ -412,6 +435,22 @@ otcRouter.get('/settlement/:rfqId', (c) => {
 otcRouter.post('/settlement/submit-leg', async (c) => {
   try {
     const { rfqId, leg, signature } = await c.req.json();
+    const rfq = otcGetRFQ(rfqId);
+
+    // Re-validate Contra balances before recording settlement
+    const { getChannelBalance } = await import('../services/contra.js');
+    if (leg === 'A' && rfq.originatorWallet) {
+      const bal = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
+      if (!bal || BigInt(bal.amount) < BigInt(rfq.sellAmount)) {
+        return c.json({ error: `Originator has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
+      }
+    }
+    if (leg === 'B' && rfq.providerWallet) {
+      const bal = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
+      if (!bal || BigInt(bal.amount) < BigInt(rfq.indicativeBuyAmount)) {
+        return c.json({ error: `Provider has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
+      }
+    }
 
     if (!rfqId || !leg || !signature) {
       return c.json({ error: 'rfqId, leg (A/B), and signature are required' }, 400);
@@ -419,10 +458,10 @@ otcRouter.post('/settlement/submit-leg', async (c) => {
 
     console.log(`Settlement leg ${leg} submitted for RFQ ${rfqId}: ${signature}`);
 
-    const rfq = recordSettlementLegSig(rfqId, leg, signature);
-    broadcast({ type: 'otc_escrow_submitted', data: rfq } as any);
+    const updatedRfq = recordSettlementLegSig(rfqId, leg, signature);
+    broadcast({ type: 'otc_escrow_submitted', data: updatedRfq } as any);
 
-    return c.json({ success: true, rfq });
+    return c.json({ success: true, rfq: updatedRfq });
   } catch (err: any) {
     console.error('Settlement leg submission failed:', err.message);
     return c.json({ error: err.message }, 500);
