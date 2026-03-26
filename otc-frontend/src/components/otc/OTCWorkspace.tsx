@@ -13,6 +13,7 @@ import DepositEscrowModal from './escrow/DepositEscrowModal';
 import EscrowStatusCard from './escrow/EscrowStatusCard';
 import EscrowTimeline from './escrow/EscrowTimeline';
 import { formatRawAmount, getTokenSymbol, timeAgo, toRawAmount } from '../../lib/constants';
+import TokenIcon from '../ui/TokenIcon';
 import { signAndSendToContra } from '../../lib/sendToContra';
 import {
   acceptQuote,
@@ -69,8 +70,10 @@ function RFQInventory({
                 <RFQStatusBadge status={rfq.status} />
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
-                <span className="text-terminal-dim">
+                <span className="flex items-center gap-1.5 text-terminal-dim">
+                  <TokenIcon mint={rfq.sellToken} size={16} />
                   {getTokenSymbol(rfq.sellToken)}/{getTokenSymbol(rfq.buyToken)}
+                  <TokenIcon mint={rfq.buyToken} size={16} />
                 </span>
                 <span className="text-terminal-accent">
                   {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenSymbol(rfq.sellToken)}
@@ -168,6 +171,21 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
   useEffect(() => {
     void refreshList();
   }, [refreshList]);
+
+  // Auto-register wallet when viewing a ReadyToSettle RFQ
+  useEffect(() => {
+    if (!selectedRFQ || !currentUser || !publicKey) return;
+    if (selectedRFQ.status !== RFQStatus.ReadyToSettle) return;
+
+    const isOrig = currentUser.id === selectedRFQ.originatorId;
+    const alreadyRegistered = isOrig ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet;
+    if (alreadyRegistered) return;
+
+    // Register wallet silently in the background
+    registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString())
+      .then(() => refreshDetail(selectedRFQ.id))
+      .catch(() => {});
+  }, [selectedRFQ?.id, selectedRFQ?.status, currentUser?.id, publicKey]);
 
   useEffect(() => {
     if (route === '/otc/rfqs/[rfqId]' && rfqId) {
@@ -377,22 +395,22 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
 
     setSubmitting(true);
     try {
-      const walletAddr = publicKey.toString();
       const isOriginator = currentUser.id === selectedRFQ.originatorId;
       const myLeg: 'A' | 'B' = isOriginator ? 'A' : 'B';
 
-      // 1. Register wallet address for settlement
-      toast.loading('Registering wallet for settlement...', { id: 'settlement' });
-      await registerSettlementWallet(selectedRFQ.id, currentUser.id, walletAddr);
+      // Ensure wallet is registered (may already be from auto-register)
+      if (!(isOriginator ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet)) {
+        await registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString());
+      }
 
-      // 2. Build settlement legs (requires both wallets registered)
+      // Build legs if not already built
+      toast.loading('Preparing settlement...', { id: 'settlement' });
       let settlement: { legATx: string; legBTx: string };
       try {
         settlement = await buildSettlementLegs(selectedRFQ.id);
       } catch (err: any) {
         if (err.message?.includes('Both parties must register')) {
-          toast.success('Wallet registered. Waiting for counterparty to connect their wallet.', { id: 'settlement' });
-          await refreshDetail(selectedRFQ.id);
+          toast.error('Counterparty has not opened this RFQ yet. Ask them to view it first.', { id: 'settlement' });
           return;
         }
         throw err;
@@ -404,12 +422,12 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
         return;
       }
 
-      // 3. Sign and send to Contra channel
+      // Sign and send to Contra channel
       toast.loading('Sign the swap transaction in your wallet...', { id: 'settlement' });
       const signature = await signAndSendToContra(myLegTx, signTransaction);
-      toast.loading('Confirming on Contra channel...', { id: 'settlement' });
 
-      // 4. Record the confirmed leg
+      // Record the confirmed leg
+      toast.loading('Recording settlement...', { id: 'settlement' });
       await submitSettlementLeg(selectedRFQ.id, myLeg, signature);
       toast.success('Settlement leg signed! Tokens swapped on Contra channel.', { id: 'settlement' });
 

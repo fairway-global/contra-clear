@@ -15,6 +15,7 @@ import {
   getSolscanTxUrl,
 } from '../../lib/constants';
 import Panel from '../layout/Panel';
+import TokenIcon from '../ui/TokenIcon';
 import { useBalances } from '../../hooks/useBalances';
 
 function getFriendlyDepositError(message: string, tokenLabel: string): string {
@@ -131,20 +132,23 @@ export default function DepositPanel() {
       <div className="space-y-4">
         <div>
           <label className="block text-xs font-mono text-terminal-dim mb-1 uppercase">Token</label>
-          <select
-            className="select-field"
-            value={selectedMint}
-            onChange={e => setSelectedMint(e.target.value)}
-            disabled={!validTokens.length}
-          >
-            {validTokens.length === 0 ? (
-              <option value="">No wallet SPL tokens found</option>
-            ) : (
-              validTokens.map(t => (
-                <option key={t.mint} value={t.mint}>{t.symbol} - {getTokenName(t.mint)}</option>
-              ))
-            )}
-          </select>
+          <div className="flex items-center gap-2">
+            {selectedMint && <TokenIcon mint={selectedMint} size={24} />}
+            <select
+              className="select-field flex-1"
+              value={selectedMint}
+              onChange={e => setSelectedMint(e.target.value)}
+              disabled={!validTokens.length}
+            >
+              {validTokens.length === 0 ? (
+                <option value="">No wallet SPL tokens found</option>
+              ) : (
+                validTokens.map(t => (
+                  <option key={t.mint} value={t.mint}>{t.symbol} - {getTokenName(t.mint)}</option>
+                ))
+              )}
+            </select>
+          </div>
         </div>
 
         <div>

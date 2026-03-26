@@ -3,6 +3,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import toast from 'react-hot-toast';
 import Panel from '../layout/Panel';
+import TokenIcon from '../ui/TokenIcon';
 import { getSolscanTxUrl } from '../../lib/constants';
 
 const TOKENS = [
@@ -49,8 +50,8 @@ export default function FaucetPage() {
         >
           <div className="px-5 py-4">
             <div className="flex items-center gap-3 mb-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-terminal-green/20 text-lg">
-                {selectedToken.flag}
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-terminal-green/20">
+                <img src={`https://raw.githubusercontent.com/fairway-global/otc-stablecoins/main/metadata/${selectedToken.symbol}.svg`} alt={selectedToken.symbol} className="h-6 w-6 rounded-full" />
               </div>
               <div>
                 <div className="font-mono text-sm font-bold text-terminal-green">Minted {data.amount} {data.token}</div>
@@ -108,12 +109,7 @@ export default function FaucetPage() {
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <div
-                          className="flex h-8 w-8 items-center justify-center rounded-full text-base shrink-0"
-                          style={{ background: `${t.color}20`, border: `1px solid ${t.color}40` }}
-                        >
-                          {t.flag}
-                        </div>
+                        <TokenIcon mint={t.mint} size={32} />
                         <div className="min-w-0">
                           <div className="font-mono text-sm font-bold text-terminal-text">{t.symbol}</div>
                           <div className="font-mono text-[9px] text-terminal-dim truncate">{t.name}</div>
@@ -127,12 +123,7 @@ export default function FaucetPage() {
               {/* Selected token + amount */}
               <div className="rounded border border-terminal-accent/20 bg-terminal-accent/5 p-4">
                 <div className="flex items-center gap-4">
-                  <div
-                    className="flex h-12 w-12 items-center justify-center rounded-full text-2xl shrink-0"
-                    style={{ background: `${selectedToken.color}25`, border: `2px solid ${selectedToken.color}50` }}
-                  >
-                    {selectedToken.flag}
-                  </div>
+                  <TokenIcon mint={selectedToken.mint} size={48} />
                   <div className="flex-1 min-w-0">
                     <div className="font-mono text-lg font-bold text-terminal-text">{selectedToken.symbol}</div>
                     <div className="font-mono text-xs text-terminal-dim">{selectedToken.name}</div>

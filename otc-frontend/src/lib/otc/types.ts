@@ -83,6 +83,8 @@ export interface RFQ {
   selectedProviderName?: string;
   acceptedPrice?: string;
   filledAmount?: string;
+  originatorWallet?: string | null;
+  providerWallet?: string | null;
   settlementLegATx?: string | null;
   settlementLegBTx?: string | null;
   settlementLegASig?: string | null;

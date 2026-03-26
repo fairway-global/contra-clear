@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useBalances } from '../../hooks/useBalances';
 import { formatUiAmount, getTokenName, getTokenSymbol } from '../../lib/constants';
 import Panel from '../layout/Panel';
+import TokenIcon from '../ui/TokenIcon';
 
 export default function BalanceCard() {
   const { channelBalances, onChainBalances, loading, refresh } = useBalances();
@@ -44,7 +45,7 @@ export default function BalanceCard() {
           {balanceRows.map((row) => (
             <div key={row.mint} className="grid grid-cols-[1fr_0.9fr_0.9fr] gap-3 rounded bg-terminal-bg px-3 py-3">
               <div className="flex items-center gap-2">
-                <div className={`h-2 w-2 rounded-full ${row.channel > 0 ? 'bg-terminal-accent' : 'bg-terminal-border'}`} />
+                <TokenIcon mint={row.mint} size={20} />
                 <div className="min-w-0">
                   <div className="font-mono text-sm font-medium text-terminal-text">{getTokenSymbol(row.mint)}</div>
                   <div className="truncate font-mono text-[11px] uppercase tracking-wider text-terminal-dim">
