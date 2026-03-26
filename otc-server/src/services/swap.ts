@@ -8,10 +8,16 @@ import { getLatestBlockhash, checkTransactionConfirmed, getAccountInfo, GATEWAY_
 import * as store from '../db/store.js';
 import type { Trade } from '../types.js';
 
-async function accountExistsOnChannel(pubkey: string): Promise<boolean> {
+async function accountExistsOnChannel(ata: string): Promise<boolean> {
   try {
-    const info = await getAccountInfo(GATEWAY_URL, pubkey);
-    return info !== null;
+    // Use getTokenAccountBalance — the gateway supports this but may not support getAccountInfo
+    const response = await fetch(GATEWAY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getTokenAccountBalance', params: [ata] }),
+    });
+    const json = await response.json();
+    return json.result?.value !== undefined && json.result?.value !== null;
   } catch {
     return false;
   }

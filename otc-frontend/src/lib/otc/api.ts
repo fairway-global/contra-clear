@@ -208,6 +208,13 @@ export async function getNegotiationThread(rfqId: string): Promise<ActivityEvent
 
 // ── Settlement ────────────────────────────────────────────────────────────
 
+export async function registerSettlementWallet(rfqId: string, userId: string, walletAddress: string): Promise<{ success: boolean }> {
+  return otcFetch('/settlement/register-wallet', {
+    method: 'POST',
+    body: JSON.stringify({ rfqId, userId, walletAddress }),
+  });
+}
+
 export async function buildSettlementLegs(rfqId: string): Promise<{ rfqId: string; legATx: string; legBTx: string }> {
   return otcFetch('/settlement/build', {
     method: 'POST',

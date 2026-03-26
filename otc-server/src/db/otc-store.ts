@@ -67,6 +67,8 @@ export interface OtcRFQ {
   selectedProviderName: string | null;
   acceptedPrice: string | null;
   filledAmount: string;
+  originatorWallet: string | null;
+  providerWallet: string | null;
   settlementLegATx: string | null;
   settlementLegBTx: string | null;
   settlementLegASig: string | null;
@@ -215,6 +217,8 @@ export function initOtcSchema(): void {
       selected_provider_name TEXT,
       accepted_price TEXT,
       filled_amount TEXT NOT NULL DEFAULT '0',
+      originator_wallet TEXT,
+      provider_wallet TEXT,
       settlement_leg_a_tx TEXT,
       settlement_leg_b_tx TEXT,
       settlement_leg_a_sig TEXT,
@@ -364,6 +368,8 @@ function mapRFQ(row: any): OtcRFQ {
     selectedProviderName: row.selected_provider_name ?? null,
     acceptedPrice: row.accepted_price ?? null,
     filledAmount: row.filled_amount || '0',
+    originatorWallet: row.originator_wallet ?? null,
+    providerWallet: row.provider_wallet ?? null,
     settlementLegATx: row.settlement_leg_a_tx ?? null,
     settlementLegBTx: row.settlement_leg_b_tx ?? null,
     settlementLegASig: row.settlement_leg_a_sig ?? null,
@@ -702,34 +708,31 @@ export function otcAcceptQuote(rfqId: string, quoteId: string, actorId: string, 
       }
     }
 
-    // Update RFQ
+    // Update RFQ — go directly to ReadyToSettle (settlement via Contra channel swap)
     d.prepare(
-      `UPDATE otc_rfqs SET status = 'AwaitingOriginatorDeposit', selected_quote_id = ?, selected_provider_id = ?,
+      `UPDATE otc_rfqs SET status = 'ReadyToSettle', selected_quote_id = ?, selected_provider_id = ?,
        selected_provider_name = ?, accepted_price = ?, sell_amount = ?, indicative_buy_amount = ?, updated_at = ?
        WHERE id = ?`
     ).run(quote.id, quote.provider_id, quote.provider_name, quote.price,
       quote.sell_amount, quote.buy_amount, ts, rfqId);
 
-    // Update escrows to use fill-sized amounts
+    // Update escrow records for display (amounts each party will swap)
     d.prepare(
-      `UPDATE otc_escrows SET amount = ?, status = 'DepositRequested', updated_at = ?
+      `UPDATE otc_escrows SET amount = ?, status = 'LockedForSettlement', updated_at = ?
        WHERE rfq_id = ? AND party_role = 'RFQ_ORIGINATOR'`
     ).run(escrowSellAmount, ts, rfqId);
 
     d.prepare(
-      `UPDATE otc_escrows SET party_id = ?, party_name = ?, amount = ?, status = 'DepositRequested', updated_at = ?
+      `UPDATE otc_escrows SET party_id = ?, party_name = ?, amount = ?, status = 'LockedForSettlement', updated_at = ?
        WHERE rfq_id = ? AND party_role = 'LIQUIDITY_PROVIDER'`
     ).run(quote.provider_id, quote.provider_name, escrowBuyAmount, ts, rfqId);
 
     insertActivity(d, rfqId, 'QUOTE_ACCEPTED', actor.id, actor.full_name,
       isPartial
-        ? `Commercial terms accepted for partial fill (${escrowSellAmount} of ${rfq.sell_amount}).`
-        : 'Commercial terms accepted and escrow funding opened.',
+        ? `Terms accepted for partial fill (${escrowSellAmount} of ${rfq.sell_amount}). Sign settlement to swap on Contra channel.`
+        : 'Commercial terms accepted. Sign settlement to swap tokens on Contra channel.',
       `Accepted ${quote.provider_name} at ${quote.price}.`,
       quoteId);
-
-    insertActivity(d, rfqId, 'ESCROW_REQUESTED', actor.id, actor.full_name,
-      'Escrow deposits requested from both parties.');
   });
 
   txn();
@@ -880,6 +883,17 @@ export function otcGetAdminEscrow(): (OtcEscrow & { rfqReference: string; rfqSta
 // ── Seed demo data ────────────────────────────────────────────────────────
 
 // ── Settlement operations ─────────────────────────────────────────────────
+
+export function registerSettlementWallet(rfqId: string, userId: string, walletAddress: string): void {
+  const d = getDb();
+  const rfq = d.prepare('SELECT * FROM otc_rfqs WHERE id = ?').get(rfqId) as any;
+  if (!rfq) throw new Error('RFQ not found');
+  if (userId === rfq.originator_id) {
+    d.prepare('UPDATE otc_rfqs SET originator_wallet = ?, updated_at = ? WHERE id = ?').run(walletAddress, now(), rfqId);
+  } else if (userId === rfq.selected_provider_id) {
+    d.prepare('UPDATE otc_rfqs SET provider_wallet = ?, updated_at = ? WHERE id = ?').run(walletAddress, now(), rfqId);
+  }
+}
 
 export function storeSettlementLegs(rfqId: string, legATx: string, legBTx: string): void {
   const d = getDb();

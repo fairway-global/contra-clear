@@ -26,6 +26,7 @@ import {
   rejectQuote,
   submitEscrowTxHash,
   submitQuote,
+  registerSettlementWallet,
   buildSettlementLegs,
   getSettlementInfo,
   submitSettlementLeg,
@@ -87,7 +88,7 @@ function RFQInventory({
 }
 
 export default function OTCWorkspace({ route, rfqId, currentUser, role, onNavigate }: OTCWorkspaceProps) {
-  const { signTransaction } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -185,24 +186,32 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:3002';
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryDelay = 5000;
+    let unmounted = false;
 
     function connect() {
+      if (unmounted) return;
       try {
         ws = new WebSocket(wsUrl);
+        ws.onopen = () => { retryDelay = 5000; };
         ws.onmessage = () => {
-          // Any OTC event → refresh list and detail
           void refreshList();
           if (rfqId) void refreshDetail(rfqId);
         };
+        ws.onerror = () => { /* suppress console noise */ };
         ws.onclose = () => {
-          reconnectTimer = setTimeout(connect, 5000);
+          if (unmounted) return;
+          // Exponential backoff: 5s → 10s → 20s → max 60s
+          reconnectTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 60000);
         };
       } catch { /* ignore */ }
     }
 
     connect();
     return () => {
-      if (ws) ws.close();
+      unmounted = true;
+      if (ws) { ws.onclose = null; ws.close(); }
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
   }, [refreshList, refreshDetail, rfqId]);
@@ -364,31 +373,45 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
   };
 
   const handleSignSettlement = async () => {
-    if (!currentUser || !selectedRFQ || !signTransaction) return;
+    if (!currentUser || !selectedRFQ || !signTransaction || !publicKey) return;
 
     setSubmitting(true);
     try {
-      // 1. Build settlement legs if not already built
-      const settlement = await buildSettlementLegs(selectedRFQ.id);
-
-      // 2. Determine which leg this user signs
+      const walletAddr = publicKey.toString();
       const isOriginator = currentUser.id === selectedRFQ.originatorId;
-      const myLegTx = isOriginator ? settlement.legATx : settlement.legBTx;
       const myLeg: 'A' | 'B' = isOriginator ? 'A' : 'B';
 
+      // 1. Register wallet address for settlement
+      toast.loading('Registering wallet for settlement...', { id: 'settlement' });
+      await registerSettlementWallet(selectedRFQ.id, currentUser.id, walletAddr);
+
+      // 2. Build settlement legs (requires both wallets registered)
+      let settlement: { legATx: string; legBTx: string };
+      try {
+        settlement = await buildSettlementLegs(selectedRFQ.id);
+      } catch (err: any) {
+        if (err.message?.includes('Both parties must register')) {
+          toast.success('Wallet registered. Waiting for counterparty to connect their wallet.', { id: 'settlement' });
+          await refreshDetail(selectedRFQ.id);
+          return;
+        }
+        throw err;
+      }
+
+      const myLegTx = isOriginator ? settlement.legATx : settlement.legBTx;
       if (!myLegTx) {
-        toast.error('No settlement transaction available for your role');
+        toast.error('No settlement transaction for your role', { id: 'settlement' });
         return;
       }
 
-      // 3. Sign and send to Contra gateway
-      toast.loading('Sign the settlement transaction in your wallet...', { id: 'settlement' });
+      // 3. Sign and send to Contra channel
+      toast.loading('Sign the swap transaction in your wallet...', { id: 'settlement' });
       const signature = await signAndSendToContra(myLegTx, signTransaction);
       toast.loading('Confirming on Contra channel...', { id: 'settlement' });
 
-      // 4. Record the signed leg on backend
+      // 4. Record the confirmed leg
       await submitSettlementLeg(selectedRFQ.id, myLeg, signature);
-      toast.success('Settlement leg signed and confirmed!', { id: 'settlement' });
+      toast.success('Settlement leg signed! Tokens swapped on Contra channel.', { id: 'settlement' });
 
       await refreshList();
       await refreshDetail(selectedRFQ.id);
@@ -525,28 +548,27 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
                     Submit Quote
                   </button>
                 ) : null}
-                {myEscrow && selectedRFQ.selectedQuoteId && myEscrow.partyId === currentUser.id && myEscrow.status !== EscrowStatus.Released ? (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => {
-                      setActiveEscrow(myEscrow);
-                      setDepositOpen(true);
-                    }}
-                  >
-                    Lock Tokens in Escrow
-                  </button>
-                ) : null}
-                {selectedRFQ.status === RFQStatus.ReadyToSettle && signTransaction ? (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={submitting}
-                    onClick={() => void handleSignSettlement()}
-                  >
-                    {submitting ? 'Signing...' : 'Sign Settlement'}
-                  </button>
-                ) : null}
+                {selectedRFQ.status === RFQStatus.ReadyToSettle && signTransaction && publicKey ? (() => {
+                  const isOrig = currentUser.id === selectedRFQ.originatorId;
+                  const alreadySigned = isOrig ? selectedRFQ.settlementLegASig : selectedRFQ.settlementLegBSig;
+                  if (alreadySigned) {
+                    return (
+                      <span className="px-4 py-2 font-mono text-xs text-terminal-green border border-terminal-green/30 rounded">
+                        Your leg signed — waiting for counterparty
+                      </span>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={submitting}
+                      onClick={() => void handleSignSettlement()}
+                    >
+                      {submitting ? 'Signing...' : 'Sign Settlement'}
+                    </button>
+                  );
+                })() : null}
               </>
             )}
           />

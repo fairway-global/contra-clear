@@ -47,8 +47,10 @@ export default function EscrowStatusCard({ escrows }: EscrowStatusCardProps) {
               <span className="text-terminal-text">{getTokenSymbol(escrow.tokenMint)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-terminal-dim">Reference</span>
-              <span className="text-terminal-text">{escrow.txHash ? `${escrow.txHash.slice(0, 8)}...${escrow.txHash.slice(-6)}` : 'Awaiting submission'}</span>
+              <span className="text-terminal-dim">Status</span>
+              <span className={`${escrow.status === EscrowStatus.Released ? 'text-terminal-green' : 'text-terminal-dim'}`}>
+                {escrow.status === EscrowStatus.Released ? 'Settled via Contra channel' : escrow.status === EscrowStatus.LockedForSettlement ? 'Pending settlement signature' : ESCROW_STATUS_LABELS[escrow.status]}
+              </span>
             </div>
           </div>
         </div>
