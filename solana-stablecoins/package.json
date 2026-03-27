@@ -1,0 +1,19 @@
+{
+  "name": "solana-mock-stablecoins",
+  "version": "1.0.0",
+  "description": "Create mock stablecoin mints on Solana devnet for OTC desk testing",
+  "type": "module",
+  "scripts": {
+    "generate-metadata": "npx tsx generate-metadata.ts",
+    "create": "npx tsx create-mocks-with-metadata.ts",
+    "create:legacy": "npx tsx create-legacy-mints.ts",
+    "mint-more": "npx tsx mint-more.ts",
+    "check-balances": "npx tsx check-balances.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@solana/spl-token": "^0.4.9",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,31 +1,20 @@
-import { useMemo, useState } from 'react';
-import type { User } from '../../lib/otc/types';
-import { USER_ROLE_LABELS } from '../../lib/otc/types';
+import { useState } from 'react';
 
 interface LoginPageProps {
-  users: User[];
   submitting: boolean;
   onSubmit: (payload: { email: string; password: string }) => Promise<void> | void;
   onNavigateHome: () => void;
   onNavigateSignup: () => void;
 }
 
-const DEMO_PASSWORD = 'contra123';
-
 export default function LoginPage({
-  users,
   submitting,
   onSubmit,
   onNavigateHome,
   onNavigateSignup,
 }: LoginPageProps) {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState(DEMO_PASSWORD);
-
-  const demoUsers = useMemo(
-    () => users.filter((user) => user.status === 'ACTIVE'),
-    [users],
-  );
+  const [password, setPassword] = useState('');
 
   return (
     <div className="mx-auto grid max-w-6xl gap-4 xl:grid-cols-[1.08fr_0.92fr]">
@@ -55,20 +44,6 @@ export default function LoginPage({
             </div>
           </div>
 
-          <div className="rounded border border-terminal-border bg-terminal-bg p-4">
-            <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">Demo Credentials</div>
-            <div className="mt-3 space-y-2 font-mono text-xs leading-6 text-terminal-dim">
-              {demoUsers.map((user) => (
-                <div key={user.id} className="flex flex-col gap-1 border-b border-terminal-border/70 pb-2 last:border-b-0 last:pb-0 md:flex-row md:items-center md:justify-between">
-                  <span>{user.fullName}</span>
-                  <span>
-                    {user.email} / {DEMO_PASSWORD} / {USER_ROLE_LABELS[user.role]}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
           <div className="flex flex-wrap gap-3">
             <button type="button" className="btn-secondary" onClick={onNavigateHome}>
               Back To Landing Page
@@ -91,19 +66,11 @@ export default function LoginPage({
             <label className="mb-1 block font-mono text-xs uppercase tracking-wider text-terminal-dim">Work Email</label>
             <input
               className="input-field"
-              list="contra-login-emails"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="name@institution.com"
               autoComplete="email"
             />
-            <datalist id="contra-login-emails">
-              {demoUsers.map((user) => (
-                <option key={user.id} value={user.email}>
-                  {user.fullName}
-                </option>
-              ))}
-            </datalist>
           </div>
 
           <div>
@@ -129,7 +96,7 @@ export default function LoginPage({
 
           <div className="rounded border border-terminal-border bg-terminal-bg p-4 font-mono text-xs leading-6 text-terminal-dim">
             No account yet?
-            <div className="mt-2">Submit your institutional access request and continue through KYB onboarding.</div>
+            <div className="mt-2">Submit your access request and complete KYC/KYB onboarding.</div>
             <button type="button" className="btn-secondary mt-4" onClick={onNavigateSignup}>
               Sign Up
             </button>

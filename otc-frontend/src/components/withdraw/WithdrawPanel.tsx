@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { getAssociatedTokenAddress, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import toast from 'react-hot-toast';
 import { buildWithdrawTx, confirmWithdrawal } from '../../lib/api';
 import {
@@ -14,6 +14,7 @@ import {
   toRawAmount,
 } from '../../lib/constants';
 import Panel from '../layout/Panel';
+import TokenIcon from '../ui/TokenIcon';
 import { useBalances } from '../../hooks/useBalances';
 import { useDeposits } from '../../hooks/useDeposits';
 
@@ -60,7 +61,7 @@ export default function WithdrawPanel() {
 
       // Snapshot: get the latest tx on the user's ATA BEFORE the burn
       // so we can detect the operator's new ReleaseFunds tx after
-      const ata = await getAssociatedTokenAddress(new PublicKey(mintForTx), publicKey, false, TOKEN_PROGRAM_ID);
+      const ata = await getAssociatedTokenAddress(new PublicKey(mintForTx), publicKey, false, TOKEN_2022_PROGRAM_ID);
       let lastKnownSig: string | null = null;
       try {
         const r = await fetch(SOLANA_VALIDATOR_URL, {
@@ -137,20 +138,23 @@ export default function WithdrawPanel() {
       <div className="space-y-4">
         <div>
           <label className="block text-xs font-mono text-terminal-dim mb-1 uppercase">Token</label>
-          <select
-            className="select-field"
-            value={selectedMint}
-            onChange={e => setSelectedMint(e.target.value)}
-            disabled={!validTokens.length}
-          >
-            {validTokens.length === 0 ? (
-              <option value="">No channel SPL tokens found</option>
-            ) : (
-              validTokens.map(t => (
-                <option key={t.mint} value={t.mint}>{t.symbol} - {getTokenName(t.mint)}</option>
-              ))
+          <div className="flex items-center gap-2">
+            {selectedMint && <TokenIcon mint={selectedMint} size={24} />}
+            <select
+              className="select-field flex-1"
+              value={selectedMint}
+              onChange={e => setSelectedMint(e.target.value)}
+              disabled={!validTokens.length}
+            >
+              {validTokens.length === 0 ? (
+                <option value="">No channel SPL tokens found</option>
+              ) : (
+                validTokens.map(t => (
+                  <option key={t.mint} value={t.mint}>{t.symbol} - {getTokenName(t.mint)}</option>
+                ))
             )}
           </select>
+          </div>
         </div>
 
         <div>

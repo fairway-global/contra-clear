@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { formatRawAmount, getTokenName, getTokenSymbol, timeAgo } from '../../../lib/constants';
 import type { RFQ } from '../../../lib/otc/types';
 import RFQStatusBadge from './RFQStatusBadge';
+import TokenIcon from '../../ui/TokenIcon';
 
 interface RFQDetailsHeaderProps {
   rfq: RFQ;
@@ -20,8 +21,12 @@ export default function RFQDetailsHeader({ rfq, action }: RFQDetailsHeaderProps)
             <RFQStatusBadge status={rfq.status} />
           </div>
           <div>
-            <h2 className="font-mono text-xl text-terminal-text">
-              {getTokenSymbol(rfq.sellToken)} to {getTokenSymbol(rfq.buyToken)}
+            <h2 className="font-mono text-xl text-terminal-text flex items-center gap-2">
+              <TokenIcon mint={rfq.sellToken} size={24} />
+              {getTokenSymbol(rfq.sellToken)}
+              <span className="text-terminal-dim">to</span>
+              <TokenIcon mint={rfq.buyToken} size={24} />
+              {getTokenSymbol(rfq.buyToken)}
             </h2>
             <p className="mt-1 font-mono text-xs text-terminal-dim">
               Base {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenName(rfq.sellToken)} for indicative {formatRawAmount(rfq.indicativeBuyAmount, rfq.buyToken)} {getTokenName(rfq.buyToken)}.

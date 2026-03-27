@@ -105,11 +105,8 @@ export default function SignupPage({
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <button type="button" className="btn-primary" onClick={onNavigateKyc}>
-                {isInstitution ? 'Verify And Finish KYB' : 'Complete KYC Verification'}
-              </button>
-              <button type="button" className="btn-secondary" onClick={onNavigateLogin}>
-                Back To Sign In
+              <button type="button" className="btn-primary" onClick={onNavigateLogin}>
+                {isInstitution ? 'Sign In To Start KYB' : 'Sign In To Start KYC'}
               </button>
               <button type="button" className="btn-secondary" onClick={onNavigateHome}>
                 Back To Landing Page

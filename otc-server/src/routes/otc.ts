@@ -28,9 +28,14 @@ import {
   getKycStatusByEmail,
   processZypheVerification,
   updateKycAttestation,
+  registerSettlementWallet,
+  storeSettlementLegs,
+  recordSettlementLegSig,
 } from '../db/otc-store.js';
 import { broadcast } from '../services/ws.js';
 import { createSASAttestation } from '../services/attestation.js';
+import { buildLegATransaction, buildLegBTransaction } from '../services/swap.js';
+import { checkTransactionConfirmed, GATEWAY_URL } from '../services/contra.js';
 import type { UserRole } from '../db/otc-store.js';
 
 // ── Supabase admin client ─────────────────────────────────────────────────
@@ -310,24 +315,179 @@ otcRouter.get('/admin/escrow', (c) => {
   return c.json(otcGetAdminEscrow());
 });
 
+// ── Settlement endpoints ──────────────────────────────────────────────────
+
+// Register wallet address for settlement
+otcRouter.post('/settlement/register-wallet', async (c) => {
+  try {
+    const { rfqId, userId, walletAddress } = await c.req.json();
+    registerSettlementWallet(rfqId, userId, walletAddress);
+    const rfq = otcGetRFQ(rfqId);
+
+    // If both wallets are now registered and legs not yet built, build them
+    if (rfq.originatorWallet && rfq.providerWallet && !rfq.settlementLegATx) {
+      const trade = {
+        id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
+        partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
+        sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
+        buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
+        price: rfq.acceptedPrice || '0', status: 'pending_signatures' as const,
+        legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
+      };
+
+      try {
+        const legATx = await buildLegATransaction(trade);
+        const legBTx = await buildLegBTransaction(trade);
+        storeSettlementLegs(rfqId, legATx, legBTx);
+        broadcast({ type: 'otc_escrow_submitted', data: otcGetRFQ(rfqId) } as any);
+      } catch (err: any) {
+        console.error('Settlement leg build failed:', err.message);
+      }
+    }
+
+    return c.json({ success: true, rfq: otcGetRFQ(rfqId) });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// Build settlement legs (called by frontend if legs not yet built)
+otcRouter.post('/settlement/build', async (c) => {
+  try {
+    const { rfqId } = await c.req.json();
+    const rfq = otcGetRFQ(rfqId);
+
+    if (rfq.status !== 'ReadyToSettle') {
+      return c.json({ error: 'RFQ is not ready for settlement' }, 400);
+    }
+
+    if (rfq.settlementLegATx && rfq.settlementLegBTx) {
+      return c.json({ rfqId, legATx: rfq.settlementLegATx, legBTx: rfq.settlementLegBTx });
+    }
+
+    if (!rfq.originatorWallet || !rfq.providerWallet) {
+      return c.json({ error: 'Both parties must register their wallet addresses first. Connect your wallet and try again.' }, 400);
+    }
+
+    // Validate Contra channel balances before building settlement
+    const { getChannelBalance } = await import('../services/contra.js');
+
+    const originatorBalance = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
+    const sellAmountRaw = BigInt(rfq.sellAmount);
+    if (!originatorBalance || BigInt(originatorBalance.amount) < sellAmountRaw) {
+      const has = originatorBalance ? originatorBalance.uiAmount : 0;
+      const needs = Number(sellAmountRaw) / 1e6;
+      return c.json({
+        error: `Originator has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.sellToken.slice(0,8)}... Deposit to Contra first.`
+      }, 400);
+    }
+
+    const providerBalance = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
+    const buyAmountRaw = BigInt(rfq.indicativeBuyAmount);
+    if (!providerBalance || BigInt(providerBalance.amount) < buyAmountRaw) {
+      const has = providerBalance ? providerBalance.uiAmount : 0;
+      const needs = Number(buyAmountRaw) / 1e6;
+      return c.json({
+        error: `Liquidity provider has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.buyToken.slice(0,8)}... Deposit to Contra first.`
+      }, 400);
+    }
+
+    const trade = {
+      id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
+      partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
+      sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
+      buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
+      price: rfq.acceptedPrice || '0', status: 'pending_signatures' as const,
+      legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
+    };
+
+    const legATx = await buildLegATransaction(trade);
+    const legBTx = await buildLegBTransaction(trade);
+    storeSettlementLegs(rfqId, legATx, legBTx);
+
+    return c.json({ rfqId, legATx, legBTx });
+  } catch (err: any) {
+    console.error('Settlement build failed:', err.message);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Get settlement info for an RFQ
+otcRouter.get('/settlement/:rfqId', (c) => {
+  try {
+    const rfq = otcGetRFQ(c.req.param('rfqId'));
+    return c.json({
+      rfqId: rfq.id,
+      status: rfq.status,
+      legATx: rfq.settlementLegATx,
+      legBTx: rfq.settlementLegBTx,
+      legASig: rfq.settlementLegASig,
+      legBSig: rfq.settlementLegBSig,
+      originatorId: rfq.originatorId,
+      providerId: rfq.selectedProviderId,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+// Submit a signed settlement leg
+otcRouter.post('/settlement/submit-leg', async (c) => {
+  try {
+    const { rfqId, leg, signature } = await c.req.json();
+    const rfq = otcGetRFQ(rfqId);
+
+    // Re-validate Contra balances before recording settlement
+    const { getChannelBalance } = await import('../services/contra.js');
+    if (leg === 'A' && rfq.originatorWallet) {
+      const bal = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
+      if (!bal || BigInt(bal.amount) < BigInt(rfq.sellAmount)) {
+        return c.json({ error: `Originator has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
+      }
+    }
+    if (leg === 'B' && rfq.providerWallet) {
+      const bal = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
+      if (!bal || BigInt(bal.amount) < BigInt(rfq.indicativeBuyAmount)) {
+        return c.json({ error: `Provider has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
+      }
+    }
+
+    if (!rfqId || !leg || !signature) {
+      return c.json({ error: 'rfqId, leg (A/B), and signature are required' }, 400);
+    }
+
+    console.log(`Settlement leg ${leg} submitted for RFQ ${rfqId}: ${signature}`);
+
+    const updatedRfq = recordSettlementLegSig(rfqId, leg, signature);
+    broadcast({ type: 'otc_escrow_submitted', data: updatedRfq } as any);
+
+    return c.json({ success: true, rfq: updatedRfq });
+  } catch (err: any) {
+    console.error('Settlement leg submission failed:', err.message);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // ── KYC/DID endpoints ─────────────────────────────────────────────────────
 
 otcRouter.post('/kyc/initiate', async (c) => {
   try {
-    const { walletAddress, jurisdiction } = await c.req.json();
+    const { walletAddress, jurisdiction, type } = await c.req.json();
     if (!walletAddress || !jurisdiction) {
       return c.json({ error: 'walletAddress and jurisdiction are required' }, 400);
     }
 
+    const verificationType = type || 'kyc'; // 'kyc' or 'kyb'
+
     // Step 1: Register DID in SQLite
     const did = registerDID(walletAddress, jurisdiction);
 
-    // Step 2: Create Zyphe verification session
+    // Step 2: Create Zyphe verification session (KYC or KYB)
     const webhookUrl = process.env.ZYPHE_WEBHOOK_URL || 'http://localhost:8085';
     const sessionRes = await fetch(`${webhookUrl}/api/kyc/create-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ walletAddress }),
+      body: JSON.stringify({ walletAddress, type: verificationType }),
     });
 
     if (!sessionRes.ok) {
@@ -348,17 +508,38 @@ otcRouter.post('/kyc/initiate', async (c) => {
   }
 });
 
+// Emails that always bypass KYC/KYB (test accounts)
+const KYC_BYPASS_EMAILS = ['lp@contraotc.dev', 'rfq@contraotc.dev', 'admin@contraotc.dev'];
+
 otcRouter.get('/kyc/status', (c) => {
   const wallet = c.req.query('wallet');
   const email = c.req.query('email');
   if (!wallet && !email) {
     return c.json({ error: 'wallet or email query param is required' }, 400);
   }
-  const status = wallet ? getKycStatusByWallet(wallet) : getKycStatusByEmail(email!);
-  if (!status) {
-    return c.json({ kycStatus: 'not_found', did: null });
+
+  // Check bypass list by email
+  if (email && KYC_BYPASS_EMAILS.includes(email.toLowerCase())) {
+    return c.json({ kycStatus: 'verified', did: 'bypass', attestationPda: null });
   }
-  return c.json(status);
+
+  // Check by wallet first
+  if (wallet) {
+    const status = getKycStatusByWallet(wallet);
+    if (status) return c.json(status);
+  }
+
+  // Fall back to email
+  if (email) {
+    // Check bypass list again
+    if (KYC_BYPASS_EMAILS.includes(email.toLowerCase())) {
+      return c.json({ kycStatus: 'verified', did: 'bypass', attestationPda: null });
+    }
+    const status = getKycStatusByEmail(email);
+    if (status) return c.json(status);
+  }
+
+  return c.json({ kycStatus: 'not_found', did: null });
 });
 
 // Zyphe webhook forwarded from webhook server
@@ -366,6 +547,10 @@ otcRouter.post('/did/webhook/zyphe', async (c) => {
   try {
     const payload = await c.req.json();
     const { event, data, resultId, custom } = payload;
+    const kyb = (data as any)?.kyb;
+    const isKYB = Boolean(kyb);
+
+    console.log(`Zyphe webhook received: event=${event} resultId=${resultId} isKYB=${isKYB}`);
 
     const walletAddress =
       (custom as any)?.customData?.walletAddress ||
@@ -373,42 +558,49 @@ otcRouter.post('/did/webhook/zyphe', async (c) => {
       (data as any)?.dv?.customData?.customData?.walletAddress;
 
     if (!walletAddress) {
+      console.warn('Webhook missing walletAddress in custom data');
       return c.json({ success: false, error: 'No walletAddress in webhook' });
-    }
-
-    if (event === 'FAILED' || event === 'failed') {
-      processZypheVerification({ walletAddress, kycStatus: 'rejected', resultId });
-      return c.json({ success: true, message: 'Rejection processed' });
-    }
-
-    if (event !== 'COMPLETED') {
-      return c.json({ success: true, message: 'Event acknowledged' });
     }
 
     const kyc = (data as any)?.kyc;
     const dv = (data as any)?.dv;
-    const status = kyc?.status || dv?.status || 'PASSED';
-    const kycStatus = status === 'PASSED' ? 'verified' : 'rejected';
+
+    // KYB: always mark as verified (sandbox limitation)
+    // KYC: respect the actual verification status
+    let kycStatus: 'verified' | 'rejected';
+    if (isKYB) {
+      kycStatus = 'verified';
+    } else {
+      const status = kyc?.status || dv?.status || 'PASSED';
+      kycStatus = status === 'PASSED' ? 'verified' : 'rejected';
+      if (event === 'FAILED' || event === 'failed') {
+        kycStatus = 'rejected';
+      }
+    }
 
     const result = processZypheVerification({
       walletAddress,
-      kycStatus: kycStatus as 'verified' | 'rejected',
+      kycStatus,
       resultId,
-      identityEmail: dv?.identityEmail || kyc?.identityId,
+      identityEmail: dv?.identityEmail || kyc?.identityId || kyb?.identityEmail,
       metadata: {
-        flowId: dv?.flowId,
+        event,
+        isKYB,
+        flowId: dv?.flowId || kyb?.flowId,
         documentType: kyc?.documentType,
       },
     });
 
-    // If verified, create SAS attestation on-chain
+    console.log(`${isKYB ? 'KYB' : 'KYC'} ${kycStatus} for wallet ${walletAddress}`);
+
+    // Create SAS attestation on-chain if verified
     if (kycStatus === 'verified') {
       try {
         const attestation = await createSASAttestation(walletAddress, result.jurisdiction);
         updateKycAttestation(walletAddress, attestation.attestationPda, attestation.signature, attestation.expiry);
         console.log(`SAS attestation created for ${walletAddress}`);
       } catch (err: any) {
-        console.error('SAS attestation failed (KYC still marked verified):', err.message);
+        console.error('SAS attestation failed (status still marked verified):', err.message);
       }
     }
 

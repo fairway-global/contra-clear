@@ -1,0 +1,112 @@
+{
+  "USDC": {
+    "mint": "5L9sUJJHL73YjaJ66MSD1BtNqZo1pgidPtcNKBvVdQ2J",
+    "ata": "LJ95Q3PP5s7xTq6YH869d2P8gWvyrvqZ1fQXz5c9zrM",
+    "name": "USD Coin",
+    "symbol": "USDC",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "USDT": {
+    "mint": "7mqJuABCcbrk4UYJJtE4d3GZwR5n2a8BpaSURCq752hu",
+    "ata": "86syKxMdfEk7wiS5zwXB7mRrQgojVu7H3Xty8A7qirQy",
+    "name": "Tether USD",
+    "symbol": "USDT",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "EURC": {
+    "mint": "42k8yVzBkueqEf1cPPhVHxipvUufg5Z9PpV3DRZJxq1h",
+    "ata": "EVh36XHBfgkDijVhdARozVn3QH7Ejy4DvcsVNkWQz3sU",
+    "name": "Euro Coin",
+    "symbol": "EURC",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "PYUSD": {
+    "mint": "7D3ePHxhAzg1RAoCXwNLvCsgPo91NiVwE2BVm1vX9Loi",
+    "ata": "BuQcSLkYTUVBeyWo1XfiVvAFy6SP5VYB3QgLszuEDjnL",
+    "name": "PayPal USD",
+    "symbol": "PYUSD",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "USDG": {
+    "mint": "azTaDSr4bbhqsxFao8jUH2yz52r1sy5ihKu4XHHBkoE",
+    "ata": "Em3sAA2uGZcQvWyotFvpkhjr1iVc8viDjxp4yeoiENy",
+    "name": "Global Dollar",
+    "symbol": "USDG",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "USX": {
+    "mint": "7UAwp1VTSJyhuhHF3DQifyebNey9DnCcyADcvmkky4pC",
+    "ata": "2kqQiZ5oW5z8EL9Lr4Fjt4GSFed1DX4DGmyjQqeFq5wT",
+    "name": "USX",
+    "symbol": "USX",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "CHF": {
+    "mint": "8sKLVxMHswSVUXwR5sPox8cR4f88z49WtvmYY6J1URGd",
+    "ata": "9tcuLqJhAPKpWbdc8659hL6XFMCZ8iPZuLJS5WEg6YD9",
+    "name": "Swiss Franc Stable",
+    "symbol": "CHF",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "GBP": {
+    "mint": "2CMNySecfv9V9kA7LS2VsWzvTv7Kp35Y3jXKGKTH6qv3",
+    "ata": "747zwzHBS5GQvFFEi5baSv2nHsaPbkFANeZw8uLPoPs5",
+    "name": "British Pound Stable",
+    "symbol": "GBP",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "JPY": {
+    "mint": "FnTA78B6wp9i3tZG3NxFXZdd85rQtqzHEwpmwWkbx8PB",
+    "ata": "9NakcXsFboEqLxVSCr3KmJ88wxx1vXYQ2gTixyEDzgQm",
+    "name": "Japanese Yen Stable",
+    "symbol": "JPY",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "SGD": {
+    "mint": "DnDP4L3mEztefrhq1UedBkGbnhzmeKLxqJ7AYtiawL4f",
+    "ata": "7ygYoEP6As5gHes8Q5B8iM89PsP5zBhZCLjqn9BYPpG3",
+    "name": "Singapore Dollar Stable",
+    "symbol": "SGD",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "AED": {
+    "mint": "BSCwHCEkNUAgW3uXWEnrgNH2NsSqhiwgmd9dVQLkbshC",
+    "ata": "wMYv4buas6woeCgMS9Y1FaaPi15HiKoxdsPXxinCsBo",
+    "name": "UAE Dirham Stable",
+    "symbol": "AED",
+    "decimals": 6,
+    "initialSupply": 1000000,
+    "program": "Token-2022",
+    "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}

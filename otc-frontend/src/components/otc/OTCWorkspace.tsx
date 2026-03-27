@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
 import toast from 'react-hot-toast';
 import Panel from '../layout/Panel';
 import CreateRFQModal from './rfq/CreateRFQModal';
@@ -12,6 +13,8 @@ import DepositEscrowModal from './escrow/DepositEscrowModal';
 import EscrowStatusCard from './escrow/EscrowStatusCard';
 import EscrowTimeline from './escrow/EscrowTimeline';
 import { formatRawAmount, getTokenSymbol, timeAgo, toRawAmount } from '../../lib/constants';
+import TokenIcon from '../ui/TokenIcon';
+import { signAndSendToContra } from '../../lib/sendToContra';
 import {
   acceptQuote,
   counterQuote,
@@ -24,6 +27,10 @@ import {
   rejectQuote,
   submitEscrowTxHash,
   submitQuote,
+  registerSettlementWallet,
+  buildSettlementLegs,
+  getSettlementInfo,
+  submitSettlementLeg,
 } from '../../lib/otc/api';
 import type { ActivityEvent, EscrowObligation, Quote, RFQ, User } from '../../lib/otc/types';
 import { EscrowStatus, RFQStatus, UserRole } from '../../lib/otc/types';
@@ -63,8 +70,10 @@ function RFQInventory({
                 <RFQStatusBadge status={rfq.status} />
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
-                <span className="text-terminal-dim">
+                <span className="flex items-center gap-1.5 text-terminal-dim">
+                  <TokenIcon mint={rfq.sellToken} size={16} />
                   {getTokenSymbol(rfq.sellToken)}/{getTokenSymbol(rfq.buyToken)}
+                  <TokenIcon mint={rfq.buyToken} size={16} />
                 </span>
                 <span className="text-terminal-accent">
                   {formatRawAmount(rfq.sellAmount, rfq.sellToken)} {getTokenSymbol(rfq.sellToken)}
@@ -82,6 +91,7 @@ function RFQInventory({
 }
 
 export default function OTCWorkspace({ route, rfqId, currentUser, role, onNavigate }: OTCWorkspaceProps) {
+  const { publicKey, signTransaction } = useWallet();
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -162,6 +172,21 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     void refreshList();
   }, [refreshList]);
 
+  // Auto-register wallet when viewing a ReadyToSettle RFQ
+  useEffect(() => {
+    if (!selectedRFQ || !currentUser || !publicKey) return;
+    if (selectedRFQ.status !== RFQStatus.ReadyToSettle) return;
+
+    const isOrig = currentUser.id === selectedRFQ.originatorId;
+    const alreadyRegistered = isOrig ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet;
+    if (alreadyRegistered) return;
+
+    // Register wallet silently in the background
+    registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString())
+      .then(() => refreshDetail(selectedRFQ.id))
+      .catch(() => {});
+  }, [selectedRFQ?.id, selectedRFQ?.status, currentUser?.id, publicKey]);
+
   useEffect(() => {
     if (route === '/otc/rfqs/[rfqId]' && rfqId) {
       void refreshDetail(rfqId);
@@ -173,6 +198,41 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     setEvents([]);
     setEscrows([]);
   }, [refreshDetail, rfqId, route]);
+
+  // WebSocket: auto-refresh on OTC events
+  useEffect(() => {
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:3002';
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryDelay = 5000;
+    let unmounted = false;
+
+    function connect() {
+      if (unmounted) return;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => { retryDelay = 5000; };
+        ws.onmessage = () => {
+          void refreshList();
+          if (rfqId) void refreshDetail(rfqId);
+        };
+        ws.onerror = () => { /* suppress console noise */ };
+        ws.onclose = () => {
+          if (unmounted) return;
+          // Exponential backoff: 5s → 10s → 20s → max 60s
+          reconnectTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 60000);
+        };
+      } catch { /* ignore */ }
+    }
+
+    connect();
+    return () => {
+      unmounted = true;
+      if (ws) { ws.onclose = null; ws.close(); }
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, [refreshList, refreshDetail, rfqId]);
 
   const canCreateRFQ = role === UserRole.RFQ_ORIGINATOR;
   const canSubmitQuote = Boolean(
@@ -330,6 +390,56 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     }
   };
 
+  const handleSignSettlement = async () => {
+    if (!currentUser || !selectedRFQ || !signTransaction || !publicKey) return;
+
+    setSubmitting(true);
+    try {
+      const isOriginator = currentUser.id === selectedRFQ.originatorId;
+      const myLeg: 'A' | 'B' = isOriginator ? 'A' : 'B';
+
+      // Ensure wallet is registered (may already be from auto-register)
+      if (!(isOriginator ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet)) {
+        await registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString());
+      }
+
+      // Build legs if not already built
+      toast.loading('Preparing settlement...', { id: 'settlement' });
+      let settlement: { legATx: string; legBTx: string };
+      try {
+        settlement = await buildSettlementLegs(selectedRFQ.id);
+      } catch (err: any) {
+        if (err.message?.includes('Both parties must register')) {
+          toast.error('Counterparty has not opened this RFQ yet. Ask them to view it first.', { id: 'settlement' });
+          return;
+        }
+        throw err;
+      }
+
+      const myLegTx = isOriginator ? settlement.legATx : settlement.legBTx;
+      if (!myLegTx) {
+        toast.error('No settlement transaction for your role', { id: 'settlement' });
+        return;
+      }
+
+      // Sign and send to Contra channel
+      toast.loading('Sign the swap transaction in your wallet...', { id: 'settlement' });
+      const signature = await signAndSendToContra(myLegTx, signTransaction);
+
+      // Record the confirmed leg
+      toast.loading('Recording settlement...', { id: 'settlement' });
+      await submitSettlementLeg(selectedRFQ.id, myLeg, signature);
+      toast.success('Settlement leg signed! Tokens swapped on Contra channel.', { id: 'settlement' });
+
+      await refreshList();
+      await refreshDetail(selectedRFQ.id);
+    } catch (err: any) {
+      toast.error(err.message || 'Settlement signing failed', { id: 'settlement' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleDepositSubmit = async (txHash: string) => {
     if (!currentUser || !selectedRFQ || !activeEscrow) {
       return;
@@ -456,18 +566,27 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
                     Submit Quote
                   </button>
                 ) : null}
-                {myEscrow && selectedRFQ.selectedQuoteId && myEscrow.partyId === currentUser.id && myEscrow.status !== EscrowStatus.Released ? (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => {
-                      setActiveEscrow(myEscrow);
-                      setDepositOpen(true);
-                    }}
-                  >
-                    Lock Tokens in Escrow
-                  </button>
-                ) : null}
+                {selectedRFQ.status === RFQStatus.ReadyToSettle && signTransaction && publicKey ? (() => {
+                  const isOrig = currentUser.id === selectedRFQ.originatorId;
+                  const alreadySigned = isOrig ? selectedRFQ.settlementLegASig : selectedRFQ.settlementLegBSig;
+                  if (alreadySigned) {
+                    return (
+                      <span className="px-4 py-2 font-mono text-xs text-terminal-green border border-terminal-green/30 rounded">
+                        Your leg signed — waiting for counterparty
+                      </span>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={submitting}
+                      onClick={() => void handleSignSettlement()}
+                    >
+                      {submitting ? 'Signing...' : 'Sign Settlement'}
+                    </button>
+                  );
+                })() : null}
               </>
             )}
           />

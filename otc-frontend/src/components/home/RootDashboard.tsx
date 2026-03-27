@@ -10,12 +10,12 @@ interface RootDashboardProps {
 const workflowSteps = [
   {
     id: '01',
-    title: 'Institution creates RFQ',
+    title: 'Clients creates RFQ',
     description: 'Submit a structured request for quote with asset, size, and parameters.',
   },
   {
     id: '02',
-    title: 'Bank submits quote',
+    title: 'Liquidity providers submits quote',
     description: 'The operating bank responds with pricing, terms, and execution parameters.',
   },
   {
@@ -122,7 +122,7 @@ function ShowcasePanel({
           <div className="h-2.5 w-2.5 rounded-full bg-terminal-border" />
         </div>
         <div className="flex-1 text-center font-mono text-[10px] uppercase tracking-wider text-terminal-dim">
-          app.contraotc.io/{title.toLowerCase().replace(/\s+/g, '-')}
+          contraclear.fairway.global/{title.toLowerCase().replace(/\s+/g, '-')}
         </div>
         {badge ? (
           <div className="rounded border border-terminal-accent/30 bg-terminal-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-terminal-accent">
@@ -276,7 +276,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
               ))}
             </div>
             <div className="space-y-2">
-              {['INST-A -> 500 SOL @ $148.20', 'INST-B -> 1,200 ETH @ $3,420'].map((line) => (
+              {['INST-A -> 500 USDC @ $148.20', 'INST-B -> 1,200 EUR @ $3,420'].map((line) => (
                 <div key={line} className="rounded border border-terminal-border bg-terminal-bg px-3 py-2 font-mono text-[10px] text-terminal-dim">
                   {line}
                 </div>
@@ -291,9 +291,9 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
             </div>
             <div className="space-y-2">
               {[
-                { pair: 'SOL/USDC', size: '50,000 SOL', status: 'Quoted' },
-                { pair: 'ETH/USDC', size: '2,000 ETH', status: 'Negotiating' },
-                { pair: 'BTC/USDC', size: '100 BTC', status: 'In Escrow' },
+                { pair: 'CHF/USDC', size: '50,000 CHF', status: 'Quoted' },
+                { pair: 'EUR/USDC', size: '2,000 EUR', status: 'Negotiating' },
+                { pair: 'AED/USDC', size: '100 AED', status: 'In Escrow' },
               ].map((row) => (
                 <div key={row.pair} className="flex items-center justify-between rounded border border-terminal-border bg-terminal-bg px-3 py-3">
                   <div>
@@ -363,7 +363,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
           <button type="button" className="btn-primary min-w-52" onClick={onReadyToStart}>
             Ready To Start
           </button>
-          <button type="button" className="btn-secondary min-w-52" onClick={() => window.location.href = 'mailto:sales@contraotc.dev'}>
+          <button type="button" className="btn-secondary min-w-52" onClick={() => window.location.href = 'mailto:hello@fairway.global'}>
             Contact Sales
           </button>
         </div>

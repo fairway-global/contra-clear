@@ -11,6 +11,7 @@ import rfqRouter from './routes/rfq.js';
 import tradesRouter from './routes/trades.js';
 import withdrawalsRouter from './routes/withdrawals.js';
 import otcRouter, { initOtcSchema, seedOtcDemoData } from './routes/otc.js';
+import faucetRouter from './routes/faucet.js';
 
 import { getAllDeposits, getDb } from './db/store.js';
 import { getSlot, GATEWAY_URL, VALIDATOR_URL } from './services/contra.js';
@@ -56,6 +57,7 @@ app.route('/api/rfq', rfqRouter);
 app.route('/api/trades', tradesRouter);
 app.route('/api/withdraw', withdrawalsRouter);
 app.route('/api/otc', otcRouter);
+app.route('/api/faucet', faucetRouter);
 
 // Token decimals for admin display
 const DEMO_MINTS = (process.env.DEMO_TOKEN_MINTS || '').split(',').filter(Boolean);

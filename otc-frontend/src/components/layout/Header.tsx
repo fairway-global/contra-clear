@@ -120,6 +120,16 @@ export default function Header({
           ) : null}
 
           {showWalletControls ? <WalletMultiButton /> : null}
+
+          {showWalletControls && publicKey ? (
+            <button
+              type="button"
+              className="rounded border border-yellow-500 bg-yellow-500/10 px-3 py-1.5 font-mono text-xs font-semibold text-yellow-400 hover:bg-yellow-500/20 transition-colors"
+              onClick={() => onNavigate('/faucet')}
+            >
+              Faucet
+            </button>
+          ) : null}
         </div>
       </div>
     </header>

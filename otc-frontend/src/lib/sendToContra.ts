@@ -1,25 +1,37 @@
-import { Transaction } from '@solana/web3.js';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { CONTRA_GATEWAY_URL } from './constants';
 
 /**
  * Sign a transaction with the wallet and submit to Contra gateway.
- * Handles Phantom's ComputeBudget injection by re-serializing without those instructions.
+ * Supports both legacy Transaction and VersionedTransaction (v0).
  */
 export async function signAndSendToContra(
   unsignedTxBase64: string,
-  signTransaction: (tx: Transaction) => Promise<Transaction>
+  signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>
 ): Promise<string> {
-  const tx = Transaction.from(Buffer.from(unsignedTxBase64, 'base64'));
-  const signed = await signTransaction(tx);
+  const txBytes = Buffer.from(unsignedTxBase64, 'base64');
 
-  // Phantom may add ComputeBudget instructions. Contra's channel doesn't support them.
-  // We need to strip them and rebuild the transaction with only the original instructions.
-  // Since the signature covers the message, we can't modify instructions post-signing.
-  // Instead, we serialize exactly what was signed and let the gateway handle it.
+  // Detect if it's a versioned transaction (first byte is a version prefix)
+  // VersionedTransaction: first byte has high bit set or is 0x80
+  // Legacy Transaction: first byte is the number of signatures
+  let signed: Transaction | VersionedTransaction;
+  let isVersioned = false;
+
+  try {
+    // Try VersionedTransaction first
+    const vtx = VersionedTransaction.deserialize(txBytes);
+    signed = await signTransaction(vtx);
+    isVersioned = true;
+  } catch {
+    // Fall back to legacy Transaction
+    const tx = Transaction.from(txBytes);
+    signed = await signTransaction(tx) as Transaction;
+  }
+
   const serialized = signed.serialize();
   const base64 = Buffer.from(serialized).toString('base64');
 
-  // Submit directly via JSON-RPC (not through web3.js Connection which may alter behavior)
+  // Submit to Contra gateway via JSON-RPC
   const response = await fetch(CONTRA_GATEWAY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -33,36 +45,52 @@ export async function signAndSendToContra(
 
   const json = await response.json();
 
+  console.log('Contra gateway response:', JSON.stringify(json));
+
   if (json.error) {
+    console.error('Gateway error:', JSON.stringify(json.error));
     throw new Error(json.error.message || 'Gateway rejected transaction');
   }
 
-  // The gateway returns the signature
-  // But we also know the signature from the signed transaction
-  const sig = signed.signatures[0];
-  if (!sig?.signature) throw new Error('No signature found in signed transaction');
-
-  // Use bs58 to encode the signature
-  const bs58chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  function toBase58(bytes: Uint8Array): string {
-    const digits = [0];
-    for (const byte of bytes) {
-      let carry = byte;
-      for (let j = 0; j < digits.length; j++) {
-        carry += digits[j] << 8;
-        digits[j] = carry % 58;
-        carry = (carry / 58) | 0;
-      }
-      while (carry > 0) {
-        digits.push(carry % 58);
-        carry = (carry / 58) | 0;
-      }
-    }
-    let str = '';
-    for (let i = 0; i < bytes.length && bytes[i] === 0; i++) str += '1';
-    for (let i = digits.length - 1; i >= 0; i--) str += bs58chars[digits[i]];
-    return str;
+  // Extract signature
+  if (json.result) {
+    return json.result;
   }
 
-  return json.result || toBase58(new Uint8Array(sig.signature));
+  // Fallback: extract signature from the signed transaction
+  if (isVersioned) {
+    const vtx = signed as VersionedTransaction;
+    if (vtx.signatures[0]) {
+      return toBase58(vtx.signatures[0]);
+    }
+  } else {
+    const tx = signed as Transaction;
+    const sig = tx.signatures[0];
+    if (sig?.signature) {
+      return toBase58(new Uint8Array(sig.signature));
+    }
+  }
+
+  throw new Error('No signature found in signed transaction');
+}
+
+function toBase58(bytes: Uint8Array): string {
+  const bs58chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = (carry / 58) | 0;
+    }
+  }
+  let str = '';
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) str += '1';
+  for (let i = digits.length - 1; i >= 0; i--) str += bs58chars[digits[i]];
+  return str;
 }

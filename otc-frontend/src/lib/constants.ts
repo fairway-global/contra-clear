@@ -37,6 +37,29 @@ const KNOWN_TOKEN_OVERRIDES: Record<string, TokenInfo> = {
   },
 };
 
+const IMG_BASE = 'https://raw.githubusercontent.com/fairway-global/otc-stablecoins/main/metadata';
+
+export const TOKEN_IMAGES: Record<string, string> = {
+  'USDC': `${IMG_BASE}/USDC.svg`,
+  'USDT': `${IMG_BASE}/USDT.svg`,
+  'EURC': `${IMG_BASE}/EURC.svg`,
+  'PYUSD': `${IMG_BASE}/PYUSD.svg`,
+  'USDG': `${IMG_BASE}/USDG.svg`,
+  'USX': `${IMG_BASE}/USX.svg`,
+  'CHF': `${IMG_BASE}/CHF.svg`,
+  'GBP': `${IMG_BASE}/GBP.svg`,
+  'JPY': `${IMG_BASE}/JPY.svg`,
+  'SGD': `${IMG_BASE}/SGD.svg`,
+  'AED': `${IMG_BASE}/AED.svg`,
+};
+
+export function getTokenImageUrl(mintOrSymbol: string): string | null {
+  if (TOKEN_IMAGES[mintOrSymbol]) return TOKEN_IMAGES[mintOrSymbol];
+  const info = KNOWN_TOKEN_OVERRIDES[mintOrSymbol] || TOKEN_REGISTRY.get(mintOrSymbol);
+  if (info && TOKEN_IMAGES[info.symbol]) return TOKEN_IMAGES[info.symbol];
+  return null;
+}
+
 const TOKEN_REGISTRY = new Map<string, TokenInfo>();
 const TOKEN_REGISTRY_LISTENERS = new Set<() => void>();
 const TOKEN_LOOKUP_PROMISES = new Map<string, Promise<TokenInfo | null>>();
