@@ -77,9 +77,8 @@ export async function signAndSendToContra(
 /**
  * Partially sign an atomic swap transaction (do NOT submit to Contra).
  * The wallet signs its own slot in the VersionedTransaction.
- * Returns the raw 64-byte signature as base64 for the connected wallet.
- *
- * The server will assemble both partial sigs and submit only when both are collected.
+ * Returns the FULL signed transaction as base64 so the backend can extract
+ * the exact signature bytes without any browser Buffer encoding issues.
  */
 export async function partialSignForContra(
   unsignedTxBase64: string,
@@ -92,7 +91,7 @@ export async function partialSignForContra(
   const vtx = VersionedTransaction.deserialize(txBytes);
   const signed = await signTransaction(vtx) as VersionedTransaction;
 
-  // Find which signature slot belongs to this wallet
+  // Verify the wallet actually signed
   const accountKeys = signed.message.staticAccountKeys;
   const numSigners = signed.message.header.numRequiredSignatures;
 
@@ -113,8 +112,8 @@ export async function partialSignForContra(
     throw new Error('Wallet did not produce a signature');
   }
 
-  // Return the 64-byte signature as base64
-  return Buffer.from(sigBytes).toString('base64');
+  // Return the full signed transaction as base64 — backend extracts the signature
+  return Buffer.from(signed.serialize()).toString('base64');
 }
 
 function toBase58(bytes: Uint8Array): string {

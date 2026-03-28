@@ -226,7 +226,7 @@ export function formatAmount(amount: string | number, decimals: number): string 
 export function formatUiAmount(amount: number): string {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 
