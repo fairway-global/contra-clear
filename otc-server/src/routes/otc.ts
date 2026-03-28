@@ -36,7 +36,7 @@ import {
 } from '../db/otc-store.js';
 import { broadcast } from '../services/ws.js';
 import { createSASAttestation } from '../services/attestation.js';
-import { buildAtomicSwapTransaction, submitAtomicSwap, buildLegATransaction, buildLegBTransaction } from '../services/swap.js';
+import { buildDepositToOperatorTx, executeOperatorRelease, getOperatorPublicKey } from '../services/swap.js';
 import { ensureChannelATAsForSwap } from '../services/channel-ata.js';
 import { checkTransactionConfirmed, GATEWAY_URL } from '../services/contra.js';
 import type { UserRole } from '../db/otc-store.js';
@@ -318,14 +318,15 @@ otcRouter.get('/admin/escrow', (c) => {
   return c.json(otcGetAdminEscrow());
 });
 
-// ── Settlement endpoints (Atomic Swap) ───────────────────────────────────
+// ── Settlement endpoints (Operator-Escrow) ───────────────────────────────
 //
 // Flow:
-// 1. Both parties register wallets via /settlement/register-wallet
-// 2. /settlement/build creates ONE atomic transaction with both transfers
-// 3. Each party signs the tx (partial sign) and submits via /settlement/submit-leg
-// 4. When both signatures are collected, server assembles + submits to Contra
-// 5. Either both transfers happen or neither does — truly atomic
+// 1. Each party sends tokens to the OPERATOR (escrow) via signAndSendToContra
+//    (immediate submission, fresh blockhash, no expiry)
+// 2. When both deposits to operator confirmed, operator releases tokens to
+//    the correct recipients server-side (operator signs with its keypair,
+//    fresh blockhash, submitted instantly)
+// 3. Truly atomic release — operator controls both release txs
 
 // Register wallet address for settlement
 otcRouter.post('/settlement/register-wallet', async (c) => {
@@ -336,10 +337,12 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
 
     // Pre-create channel ATAs if both wallets registered (async, don't block)
     if (rfq.originatorWallet && rfq.providerWallet) {
-      ensureChannelATAsForSwap(
-        rfq.originatorWallet, rfq.providerWallet,
-        rfq.sellToken, rfq.buyToken,
-      ).catch(err => console.error('ATA pre-creation failed:', err.message));
+      // Need ATAs for: operator receiving both tokens, both parties receiving the other token
+      const operatorPk = getOperatorPublicKey();
+      Promise.all([
+        ensureChannelATAsForSwap(rfq.originatorWallet, rfq.providerWallet, rfq.sellToken, rfq.buyToken),
+        ensureChannelATAsForSwap(operatorPk, operatorPk, rfq.sellToken, rfq.buyToken),
+      ]).catch(err => console.error('ATA pre-creation failed:', err.message));
     }
 
     return c.json({ success: true, rfq: otcGetRFQ(rfqId) });
@@ -348,197 +351,92 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
   }
 });
 
-// Build atomic swap transaction — ALWAYS builds fresh with a new blockhash.
-// If one party already signed a previous tx, their sig is cleared and they
-// must re-sign. This prevents blockhash expiry issues.
+// Build a tx to deposit this party's tokens to the OPERATOR (escrow).
+// Party signs and submits immediately — no blockhash expiry.
 otcRouter.post('/settlement/build', async (c) => {
   try {
-    const { rfqId } = await c.req.json();
+    const { rfqId, leg } = await c.req.json();
     const rfq = otcGetRFQ(rfqId);
 
-    if (rfq.status !== 'ReadyToSettle') {
+    if (rfq.status !== 'ReadyToSettle' && rfq.status !== 'Settling') {
       return c.json({ error: 'RFQ is not ready for settlement' }, 400);
     }
 
     if (!rfq.originatorWallet || !rfq.providerWallet) {
-      return c.json({ error: 'Both parties must register their wallet addresses first. Connect your wallet and try again.' }, 400);
+      return c.json({ error: 'Both parties must register their wallet addresses first.' }, 400);
     }
 
-    // Validate Contra channel balances before building
-    const { getChannelBalance } = await import('../services/contra.js');
+    const operatorPk = getOperatorPublicKey();
 
-    const originatorBalance = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
-    const sellAmountRaw = BigInt(rfq.sellAmount);
-    if (!originatorBalance || BigInt(originatorBalance.amount) < sellAmountRaw) {
-      const has = originatorBalance ? originatorBalance.uiAmount : 0;
-      const needs = Number(sellAmountRaw) / 1e6;
-      return c.json({
-        error: `Originator has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.sellToken.slice(0,8)}... Deposit to Contra first.`
-      }, 400);
+    // Ensure operator has channel ATAs for both tokens
+    await ensureChannelATAsForSwap(operatorPk, operatorPk, rfq.sellToken, rfq.buyToken);
+    // Ensure both parties have ATAs for receiving tokens
+    await ensureChannelATAsForSwap(rfq.originatorWallet, rfq.providerWallet, rfq.sellToken, rfq.buyToken);
+
+    // Build: party → operator transfer
+    let txBase64: string;
+    if (leg === 'A') {
+      txBase64 = await buildDepositToOperatorTx(rfq.originatorWallet, rfq.sellToken, rfq.sellAmount);
+    } else {
+      txBase64 = await buildDepositToOperatorTx(rfq.providerWallet, rfq.buyToken, rfq.indicativeBuyAmount);
     }
 
-    const providerBalance = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
-    const buyAmountRaw = BigInt(rfq.indicativeBuyAmount);
-    if (!providerBalance || BigInt(providerBalance.amount) < buyAmountRaw) {
-      const has = providerBalance ? providerBalance.uiAmount : 0;
-      const needs = Number(buyAmountRaw) / 1e6;
-      return c.json({
-        error: `Liquidity provider has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.buyToken.slice(0,8)}... Deposit to Contra first.`
-      }, 400);
-    }
-
-    // Ensure both parties have channel ATAs for the tokens they'll RECEIVE
-    await ensureChannelATAsForSwap(
-      rfq.originatorWallet, rfq.providerWallet,
-      rfq.sellToken, rfq.buyToken,
-    );
-
-    // If a tx exists AND one party already signed it, return it as-is
-    // so the second party signs the SAME message (same blockhash).
-    const hasExistingSig = rfq.settlementLegASig || rfq.settlementLegBSig;
-    if (rfq.atomicSwapTx && rfq.atomicSwapSigners && hasExistingSig) {
-      return c.json({
-        rfqId,
-        atomicSwapTx: rfq.atomicSwapTx,
-        signers: rfq.atomicSwapSigners,
-      });
-    }
-
-    // No signatures yet — build fresh with a new blockhash.
-    const trade = {
-      id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
-      partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
-      sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
-      buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
-      price: rfq.acceptedPrice || '0', status: 'pending_signatures' as const,
-      legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
-    };
-
-    const { transaction, signers } = await buildAtomicSwapTransaction(trade);
-    storeAtomicSwapTx(rfqId, transaction, signers);
-
-    return c.json({ rfqId, atomicSwapTx: transaction, signers });
+    return c.json({ rfqId, legTx: txBase64, leg });
   } catch (err: any) {
     console.error('Settlement build failed:', err.message);
     return c.json({ error: err.message }, 500);
   }
 });
 
-// Get settlement info for an RFQ
+// Get settlement info
 otcRouter.get('/settlement/:rfqId', (c) => {
   try {
     const rfq = otcGetRFQ(c.req.param('rfqId'));
     return c.json({
-      rfqId: rfq.id,
-      status: rfq.status,
-      atomicSwapTx: rfq.atomicSwapTx,
-      signers: rfq.atomicSwapSigners,
-      legASig: rfq.settlementLegASig,
-      legBSig: rfq.settlementLegBSig,
-      originatorId: rfq.originatorId,
-      providerId: rfq.selectedProviderId,
+      rfqId: rfq.id, status: rfq.status,
+      legASig: rfq.settlementLegASig, legBSig: rfq.settlementLegBSig,
+      originatorId: rfq.originatorId, providerId: rfq.selectedProviderId,
     });
   } catch (err: any) {
     return c.json({ error: err.message }, 404);
   }
 });
 
-// Submit a partial signature for the atomic swap.
-// The frontend sends the FULL signed VersionedTransaction as base64.
-// The backend extracts the correct 64-byte signature from the signer's slot.
-// When both sigs arrive, the server assembles and submits the fully-signed tx.
+// Record that a party deposited their tokens to the operator.
+// When both deposits confirmed → operator releases tokens to both parties.
 otcRouter.post('/settlement/submit-leg', async (c) => {
-  let rfqId = '';
   try {
-    const body = await c.req.json();
-    rfqId = body.rfqId;
-    const { leg, signature } = body;
-
+    const { rfqId, leg, signature } = await c.req.json();
     if (!rfqId || !leg || !signature) {
-      return c.json({ error: 'rfqId, leg (A/B), and signature (base64) are required' }, 400);
+      return c.json({ error: 'rfqId, leg (A/B), and signature are required' }, 400);
     }
 
-    const rfq = otcGetRFQ(rfqId);
+    console.log(`Settlement leg ${leg} deposited to operator for RFQ ${rfqId}: ${signature}`);
 
-    if (!rfq.atomicSwapTx || !rfq.atomicSwapSigners) {
-      return c.json({ error: 'Atomic swap transaction not yet built. Call /settlement/build first.' }, 400);
-    }
-
-    // Re-validate Contra balances
-    const { getChannelBalance } = await import('../services/contra.js');
-    if (leg === 'A' && rfq.originatorWallet) {
-      const bal = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
-      if (!bal || BigInt(bal.amount) < BigInt(rfq.sellAmount)) {
-        return c.json({ error: `Originator has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
-      }
-    }
-    if (leg === 'B' && rfq.providerWallet) {
-      const bal = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
-      if (!bal || BigInt(bal.amount) < BigInt(rfq.indicativeBuyAmount)) {
-        return c.json({ error: `Provider has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
-      }
-    }
-
-    // The frontend sends the FULL signed VersionedTransaction as base64.
-    // We store it as-is. When both are present, we splice signatures at the
-    // raw byte level (no VersionedTransaction re-serialization) to avoid
-    // message byte mismatches that cause sigverify failures.
-
-    // Quick validation: check the signed tx has the correct sig in its slot
-    const signedBytes = Buffer.from(signature, 'base64');
-    const numSigs = signedBytes[0];
-    if (numSigs !== 2) {
-      return c.json({ error: `Expected 2-signer transaction, got ${numSigs}` }, 400);
-    }
-    const SIG_SIZE = 64;
-    const mySlot = leg === 'A' ? 0 : 1;
-    const myOffset = 1 + mySlot * SIG_SIZE;
-    const mySig = signedBytes.subarray(myOffset, myOffset + SIG_SIZE);
-    if (mySig.every(b => b === 0)) {
-      return c.json({ error: 'Wallet did not produce a signature for this transaction' }, 400);
-    }
-
-    console.log(`Atomic swap signed tx (leg ${leg}) received for RFQ ${rfqId} — ${signedBytes.length} bytes, sig=${mySig.subarray(0, 4).toString('hex')}...`);
-
-    // Store the full signed transaction base64
     const updatedRfq = recordSettlementLegSig(rfqId, leg, signature);
     broadcast({ type: 'otc_escrow_submitted', data: updatedRfq } as any);
 
-    // Check if both full signed txs are now present
+    // Both parties deposited → operator releases tokens to both
     if (updatedRfq.settlementLegASig && updatedRfq.settlementLegBSig) {
-      console.log(`Both signed txs collected for RFQ ${rfqId}. Splicing and submitting...`);
+      console.log(`Both parties escrowed for RFQ ${rfqId}. Operator releasing tokens...`);
 
-      // Splice signatures at raw byte level and submit
-      const txSig = await submitAtomicSwap(
-        updatedRfq.settlementLegASig,  // full signed tx from party A
-        updatedRfq.settlementLegBSig,  // full signed tx from party B
+      const rfq = otcGetRFQ(rfqId);
+      const { releaseSigA, releaseSigB } = await executeOperatorRelease(
+        rfq.originatorWallet!, rfq.providerWallet!,
+        rfq.sellToken, rfq.sellAmount,
+        rfq.buyToken, rfq.indicativeBuyAmount,
       );
 
-      console.log(`Atomic swap confirmed for RFQ ${rfqId}: ${txSig}`);
+      console.log(`Operator released: A=${releaseSigA}, B=${releaseSigB}`);
 
-      // Mark as settled
-      const settledRfq = completeAtomicSettlement(rfqId, txSig);
+      const settledRfq = completeAtomicSettlement(rfqId, `${releaseSigA}|${releaseSigB}`);
       broadcast({ type: 'trade_completed', data: settledRfq } as any);
-
-      return c.json({ success: true, settled: true, txSignature: txSig, rfq: settledRfq });
+      return c.json({ success: true, settled: true, rfq: settledRfq });
     }
 
     return c.json({ success: true, settled: false, rfq: updatedRfq });
   } catch (err: any) {
-    console.error('Settlement leg submission failed:', err.message);
-
-    // If the swap failed (e.g. blockhash expired, sigverify), clear sigs
-    // so both parties can rebuild and re-sign with a fresh tx.
-    if (err.message?.includes('Atomic swap failed') || err.message?.includes('blockhash')) {
-      try {
-        recordSettlementLegSig(rfqId, 'A', '');
-        recordSettlementLegSig(rfqId, 'B', '');
-        const d = (await import('../db/otc-store.js'));
-        d.storeAtomicSwapTx(rfqId, '', []);
-      } catch { /* best effort cleanup */ }
-      return c.json({ error: 'Settlement failed — blockhash may have expired. Please try signing again.', retry: true }, 500);
-    }
-
+    console.error('Settlement failed:', err.message);
     return c.json({ error: err.message }, 500);
   }
 });

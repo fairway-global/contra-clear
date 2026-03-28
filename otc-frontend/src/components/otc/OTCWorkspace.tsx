@@ -28,7 +28,7 @@ import {
   submitEscrowTxHash,
   submitQuote,
   registerSettlementWallet,
-  buildSettlementLegs,
+  buildSettlementLeg,
   getSettlementInfo,
   submitSettlementLeg,
 } from '../../lib/otc/api';
@@ -402,16 +402,16 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
       const isOriginator = currentUser.id === selectedRFQ.originatorId;
       const myLeg: 'A' | 'B' = isOriginator ? 'A' : 'B';
 
-      // Ensure wallet is registered (may already be from auto-register)
+      // Ensure wallet is registered
       if (!(isOriginator ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet)) {
         await registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString());
       }
 
-      // Build atomic swap tx if not already built
-      toast.loading('Preparing atomic swap...', { id: 'settlement' });
-      let settlement: { atomicSwapTx: string; signers: string[] };
+      // Build a fresh single-signer tx for MY leg
+      toast.loading('Preparing settlement...', { id: 'settlement' });
+      let build: { legTx: string };
       try {
-        settlement = await buildSettlementLegs(selectedRFQ.id);
+        build = await buildSettlementLeg(selectedRFQ.id, myLeg);
       } catch (err: any) {
         if (err.message?.includes('Both parties must register')) {
           toast.error('Counterparty has not opened this RFQ yet. Ask them to view it first.', { id: 'settlement' });
@@ -420,27 +420,23 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
         throw err;
       }
 
-      if (!settlement.atomicSwapTx) {
-        toast.error('No atomic swap transaction available', { id: 'settlement' });
+      if (!build.legTx) {
+        toast.error('No settlement transaction available', { id: 'settlement' });
         return;
       }
 
-      // Partially sign the atomic tx (do NOT submit to Contra yet)
-      toast.loading('Sign the atomic swap in your wallet...', { id: 'settlement' });
-      const partialSig = await partialSignForContra(
-        settlement.atomicSwapTx,
-        publicKey.toString(),
-        signTransaction,
-      );
+      // Sign AND submit to Contra immediately (fresh blockhash, no expiry)
+      toast.loading('Sign the settlement in your wallet...', { id: 'settlement' });
+      const txSignature = await signAndSendToContra(build.legTx, signTransaction);
 
-      // Send partial signature to backend
-      toast.loading('Recording signature...', { id: 'settlement' });
-      const result = await submitSettlementLeg(selectedRFQ.id, myLeg, partialSig);
+      // Record the confirmed tx signature on the backend
+      toast.loading('Recording...', { id: 'settlement' });
+      const result = await submitSettlementLeg(selectedRFQ.id, myLeg, txSignature);
 
       if (result.settled) {
-        toast.success(`Atomic swap complete! Both parties\u2019 tokens swapped. TX: ${result.txSignature?.slice(0, 12)}...`, { id: 'settlement' });
+        toast.success('Settlement complete! Tokens swapped on Contra channel.', { id: 'settlement' });
       } else {
-        toast.success('Signature recorded. Waiting for counterparty to sign for atomic swap.', { id: 'settlement' });
+        toast.success('Your leg is done. Waiting for counterparty.', { id: 'settlement' });
       }
 
       await refreshList();

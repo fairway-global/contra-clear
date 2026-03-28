@@ -215,16 +215,14 @@ export async function registerSettlementWallet(rfqId: string, userId: string, wa
   });
 }
 
-export async function buildSettlementLegs(rfqId: string): Promise<{
+export async function buildSettlementLeg(rfqId: string, leg: 'A' | 'B'): Promise<{
   rfqId: string;
-  atomicSwapTx: string;
-  signers: string[];
-  legASig?: string | null;
-  legBSig?: string | null;
+  legTx: string;
+  leg: string;
 }> {
   return otcFetch('/settlement/build', {
     method: 'POST',
-    body: JSON.stringify({ rfqId }),
+    body: JSON.stringify({ rfqId, leg }),
   });
 }
 
