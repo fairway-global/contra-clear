@@ -89,6 +89,8 @@ export interface RFQ {
   settlementLegBTx?: string | null;
   settlementLegASig?: string | null;
   settlementLegBSig?: string | null;
+  atomicSwapTx?: string | null;
+  atomicSwapSigners?: string[] | null;
 }
 
 export interface Quote {

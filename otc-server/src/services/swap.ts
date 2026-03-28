@@ -1,10 +1,9 @@
 import { PublicKey, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress, createTransferInstruction,
-  createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+  TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
-import { getLatestBlockhash, checkTransactionConfirmed, getAccountInfo, GATEWAY_URL } from './contra.js';
+import { getLatestBlockhash, checkTransactionConfirmed, sendRawTransaction, GATEWAY_URL } from './contra.js';
 import * as store from '../db/store.js';
 import type { Trade } from '../types.js';
 
@@ -60,19 +59,121 @@ export async function buildTransferInstructions(
   return instructions;
 }
 
-// Build a v0 VersionedTransaction — Phantom won't inject ComputeBudget into these
-async function buildV0Transaction(feePayer: PublicKey, instructions: TransactionInstruction[]): Promise<string> {
+/**
+ * Build a single atomic swap transaction containing both legs:
+ *   - Leg A: partyA sends sellToken to partyB
+ *   - Leg B: partyB sends buyToken to partyA
+ *
+ * Both partyA and partyB are required signers. The transaction can only
+ * execute on-chain (Contra channel) when both have signed.
+ *
+ * Returns the unsigned serialized V0 transaction as base64, plus the
+ * ordered list of required signers so the frontend knows which slot
+ * each party fills.
+ */
+export async function buildAtomicSwapTransaction(trade: Trade): Promise<{
+  transaction: string;
+  signers: string[];   // [partyA pubkey, partyB pubkey]
+}> {
+  const partyA = new PublicKey(trade.partyA);
+  const partyB = new PublicKey(trade.partyB);
+  const sellMint = new PublicKey(trade.sellToken);
+  const buyMint = new PublicKey(trade.buyToken);
+  const sellAmount = BigInt(trade.sellAmount);
+  const buyAmount = BigInt(trade.buyAmount);
+
+  // Build both sets of transfer instructions
+  const legAInstructions = await buildTransferInstructions(partyA, partyB, sellMint, sellAmount);
+  const legBInstructions = await buildTransferInstructions(partyB, partyA, buyMint, buyAmount);
+
+  const allInstructions = [...legAInstructions, ...legBInstructions];
+
+  // Build a V0 VersionedTransaction — fee payer is partyA
   const { blockhash } = await getLatestBlockhash(GATEWAY_URL);
 
   const messageV0 = new TransactionMessage({
-    payerKey: feePayer,
+    payerKey: partyA,
     recentBlockhash: blockhash,
-    instructions,
+    instructions: allInstructions,
   }).compileToV0Message();
 
   const vtx = new VersionedTransaction(messageV0);
-  return Buffer.from(vtx.serialize()).toString('base64');
+
+  // The staticAccountKeys will list partyA first (fee payer), then partyB
+  // as the second required signer. Verify the signer slots.
+  const signerKeys = messageV0.staticAccountKeys
+    .slice(0, messageV0.header.numRequiredSignatures)
+    .map(k => k.toBase58());
+
+  return {
+    transaction: Buffer.from(vtx.serialize()).toString('base64'),
+    signers: signerKeys,
+  };
 }
+
+/**
+ * Given the unsigned atomic swap tx (base64) and both partial signatures,
+ * assemble the fully-signed transaction and submit to the Contra channel.
+ * Returns the transaction signature.
+ */
+export async function submitAtomicSwap(
+  unsignedTxBase64: string,
+  signerPubkeys: string[],
+  signatures: Map<string, Buffer>,
+): Promise<string> {
+  const txBytes = Buffer.from(unsignedTxBase64, 'base64');
+  const vtx = VersionedTransaction.deserialize(txBytes);
+
+  // The message's staticAccountKeys[0..numRequiredSignatures] are the signers.
+  // Insert each party's signature into the correct slot.
+  const accountKeys = vtx.message.staticAccountKeys;
+  const numSigners = vtx.message.header.numRequiredSignatures;
+
+  for (let i = 0; i < numSigners; i++) {
+    const key = accountKeys[i].toBase58();
+    const sig = signatures.get(key);
+    if (!sig) {
+      throw new Error(`Missing signature for signer ${key} (slot ${i})`);
+    }
+    vtx.signatures[i] = new Uint8Array(sig);
+  }
+
+  // Submit the fully-signed transaction to Contra
+  const serialized = Buffer.from(vtx.serialize()).toString('base64');
+  const txSig = await sendRawTransaction(GATEWAY_URL, serialized);
+
+  // Verify via getSignatureStatuses (getTransaction is not supported on the gateway)
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const response = await fetch(GATEWAY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1,
+          method: 'getSignatureStatuses',
+          params: [[txSig]],
+        }),
+      });
+      const json = await response.json() as any;
+      const status = json.result?.value?.[0];
+      if (status) {
+        if (status.err) {
+          throw new Error(`Atomic swap failed on Contra channel: ${JSON.stringify(status.err)}`);
+        }
+        // Transaction confirmed successfully
+        return txSig;
+      }
+    } catch (err: any) {
+      if (err.message?.includes('Atomic swap failed')) throw err;
+      // Status not available yet, keep polling
+    }
+  }
+
+  throw new Error('Atomic swap transaction status unknown after timeout. Check the gateway.');
+}
+
+// ── Legacy functions kept for backward compatibility with old trades ──
 
 export async function buildLegATransaction(trade: Trade): Promise<string> {
   const partyA = new PublicKey(trade.partyA);
@@ -92,6 +193,17 @@ export async function buildLegBTransaction(trade: Trade): Promise<string> {
 
   const instructions = await buildTransferInstructions(partyB, partyA, buyMint, buyAmount);
   return buildV0Transaction(partyB, instructions);
+}
+
+async function buildV0Transaction(feePayer: PublicKey, instructions: TransactionInstruction[]): Promise<string> {
+  const { blockhash } = await getLatestBlockhash(GATEWAY_URL);
+  const messageV0 = new TransactionMessage({
+    payerKey: feePayer,
+    recentBlockhash: blockhash,
+    instructions,
+  }).compileToV0Message();
+  const vtx = new VersionedTransaction(messageV0);
+  return Buffer.from(vtx.serialize()).toString('base64');
 }
 
 export async function initiateTrade(rfqId: string, quoteId: string): Promise<Trade> {

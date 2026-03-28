@@ -30,11 +30,13 @@ import {
   updateKycAttestation,
   registerSettlementWallet,
   storeSettlementLegs,
+  storeAtomicSwapTx,
   recordSettlementLegSig,
+  completeAtomicSettlement,
 } from '../db/otc-store.js';
 import { broadcast } from '../services/ws.js';
 import { createSASAttestation } from '../services/attestation.js';
-import { buildLegATransaction, buildLegBTransaction } from '../services/swap.js';
+import { buildAtomicSwapTransaction, submitAtomicSwap, buildLegATransaction, buildLegBTransaction } from '../services/swap.js';
 import { checkTransactionConfirmed, GATEWAY_URL } from '../services/contra.js';
 import type { UserRole } from '../db/otc-store.js';
 
@@ -315,7 +317,14 @@ otcRouter.get('/admin/escrow', (c) => {
   return c.json(otcGetAdminEscrow());
 });
 
-// ── Settlement endpoints ──────────────────────────────────────────────────
+// ── Settlement endpoints (Atomic Swap) ───────────────────────────────────
+//
+// Flow:
+// 1. Both parties register wallets via /settlement/register-wallet
+// 2. /settlement/build creates ONE atomic transaction with both transfers
+// 3. Each party signs the tx (partial sign) and submits via /settlement/submit-leg
+// 4. When both signatures are collected, server assembles + submits to Contra
+// 5. Either both transfers happen or neither does — truly atomic
 
 // Register wallet address for settlement
 otcRouter.post('/settlement/register-wallet', async (c) => {
@@ -324,8 +333,8 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
     registerSettlementWallet(rfqId, userId, walletAddress);
     const rfq = otcGetRFQ(rfqId);
 
-    // If both wallets are now registered and legs not yet built, build them
-    if (rfq.originatorWallet && rfq.providerWallet && !rfq.settlementLegATx) {
+    // If both wallets are now registered and atomic tx not yet built, build it
+    if (rfq.originatorWallet && rfq.providerWallet && !rfq.atomicSwapTx) {
       const trade = {
         id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
         partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
@@ -336,12 +345,11 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
       };
 
       try {
-        const legATx = await buildLegATransaction(trade);
-        const legBTx = await buildLegBTransaction(trade);
-        storeSettlementLegs(rfqId, legATx, legBTx);
+        const { transaction, signers } = await buildAtomicSwapTransaction(trade);
+        storeAtomicSwapTx(rfqId, transaction, signers);
         broadcast({ type: 'otc_escrow_submitted', data: otcGetRFQ(rfqId) } as any);
       } catch (err: any) {
-        console.error('Settlement leg build failed:', err.message);
+        console.error('Atomic swap tx build failed:', err.message);
       }
     }
 
@@ -351,7 +359,7 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
   }
 });
 
-// Build settlement legs (called by frontend if legs not yet built)
+// Build atomic swap transaction (called by frontend if tx not yet built)
 otcRouter.post('/settlement/build', async (c) => {
   try {
     const { rfqId } = await c.req.json();
@@ -361,15 +369,22 @@ otcRouter.post('/settlement/build', async (c) => {
       return c.json({ error: 'RFQ is not ready for settlement' }, 400);
     }
 
-    if (rfq.settlementLegATx && rfq.settlementLegBTx) {
-      return c.json({ rfqId, legATx: rfq.settlementLegATx, legBTx: rfq.settlementLegBTx });
+    // Return existing atomic tx if already built
+    if (rfq.atomicSwapTx && rfq.atomicSwapSigners) {
+      return c.json({
+        rfqId,
+        atomicSwapTx: rfq.atomicSwapTx,
+        signers: rfq.atomicSwapSigners,
+        legASig: rfq.settlementLegASig,
+        legBSig: rfq.settlementLegBSig,
+      });
     }
 
     if (!rfq.originatorWallet || !rfq.providerWallet) {
       return c.json({ error: 'Both parties must register their wallet addresses first. Connect your wallet and try again.' }, 400);
     }
 
-    // Validate Contra channel balances before building settlement
+    // Validate Contra channel balances before building
     const { getChannelBalance } = await import('../services/contra.js');
 
     const originatorBalance = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
@@ -401,11 +416,10 @@ otcRouter.post('/settlement/build', async (c) => {
       legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
     };
 
-    const legATx = await buildLegATransaction(trade);
-    const legBTx = await buildLegBTransaction(trade);
-    storeSettlementLegs(rfqId, legATx, legBTx);
+    const { transaction, signers } = await buildAtomicSwapTransaction(trade);
+    storeAtomicSwapTx(rfqId, transaction, signers);
 
-    return c.json({ rfqId, legATx, legBTx });
+    return c.json({ rfqId, atomicSwapTx: transaction, signers });
   } catch (err: any) {
     console.error('Settlement build failed:', err.message);
     return c.json({ error: err.message }, 500);
@@ -419,8 +433,8 @@ otcRouter.get('/settlement/:rfqId', (c) => {
     return c.json({
       rfqId: rfq.id,
       status: rfq.status,
-      legATx: rfq.settlementLegATx,
-      legBTx: rfq.settlementLegBTx,
+      atomicSwapTx: rfq.atomicSwapTx,
+      signers: rfq.atomicSwapSigners,
       legASig: rfq.settlementLegASig,
       legBSig: rfq.settlementLegBSig,
       originatorId: rfq.originatorId,
@@ -431,13 +445,25 @@ otcRouter.get('/settlement/:rfqId', (c) => {
   }
 });
 
-// Submit a signed settlement leg
+// Submit a partial signature for the atomic swap.
+// The frontend signs the tx with the wallet (partial sign — only their slot)
+// and sends the 64-byte signature as base64 here.
+// When both sigs arrive, the server assembles and submits the fully-signed tx.
 otcRouter.post('/settlement/submit-leg', async (c) => {
   try {
     const { rfqId, leg, signature } = await c.req.json();
+
+    if (!rfqId || !leg || !signature) {
+      return c.json({ error: 'rfqId, leg (A/B), and signature (base64) are required' }, 400);
+    }
+
     const rfq = otcGetRFQ(rfqId);
 
-    // Re-validate Contra balances before recording settlement
+    if (!rfq.atomicSwapTx || !rfq.atomicSwapSigners) {
+      return c.json({ error: 'Atomic swap transaction not yet built. Call /settlement/build first.' }, 400);
+    }
+
+    // Re-validate Contra balances
     const { getChannelBalance } = await import('../services/contra.js');
     if (leg === 'A' && rfq.originatorWallet) {
       const bal = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
@@ -452,16 +478,38 @@ otcRouter.post('/settlement/submit-leg', async (c) => {
       }
     }
 
-    if (!rfqId || !leg || !signature) {
-      return c.json({ error: 'rfqId, leg (A/B), and signature are required' }, 400);
-    }
+    console.log(`Atomic swap partial signature (leg ${leg}) submitted for RFQ ${rfqId}`);
 
-    console.log(`Settlement leg ${leg} submitted for RFQ ${rfqId}: ${signature}`);
-
+    // Store the partial signature
     const updatedRfq = recordSettlementLegSig(rfqId, leg, signature);
     broadcast({ type: 'otc_escrow_submitted', data: updatedRfq } as any);
 
-    return c.json({ success: true, rfq: updatedRfq });
+    // Check if both signatures are now present
+    if (updatedRfq.settlementLegASig && updatedRfq.settlementLegBSig) {
+      console.log(`Both signatures collected for RFQ ${rfqId}. Submitting atomic swap...`);
+
+      // Assemble the fully-signed transaction and submit to Contra
+      const sigMap = new Map<string, Buffer>();
+      // signers[0] = originator (partyA), signers[1] = provider (partyB)
+      sigMap.set(updatedRfq.atomicSwapSigners![0], Buffer.from(updatedRfq.settlementLegASig, 'base64'));
+      sigMap.set(updatedRfq.atomicSwapSigners![1], Buffer.from(updatedRfq.settlementLegBSig, 'base64'));
+
+      const txSig = await submitAtomicSwap(
+        updatedRfq.atomicSwapTx!,
+        updatedRfq.atomicSwapSigners!,
+        sigMap,
+      );
+
+      console.log(`Atomic swap confirmed for RFQ ${rfqId}: ${txSig}`);
+
+      // Mark as settled
+      const settledRfq = completeAtomicSettlement(rfqId, txSig);
+      broadcast({ type: 'trade_completed', data: settledRfq } as any);
+
+      return c.json({ success: true, settled: true, txSignature: txSig, rfq: settledRfq });
+    }
+
+    return c.json({ success: true, settled: false, rfq: updatedRfq });
   } catch (err: any) {
     console.error('Settlement leg submission failed:', err.message);
     return c.json({ error: err.message }, 500);

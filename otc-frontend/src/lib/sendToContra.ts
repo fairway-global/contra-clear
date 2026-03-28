@@ -74,6 +74,49 @@ export async function signAndSendToContra(
   throw new Error('No signature found in signed transaction');
 }
 
+/**
+ * Partially sign an atomic swap transaction (do NOT submit to Contra).
+ * The wallet signs its own slot in the VersionedTransaction.
+ * Returns the raw 64-byte signature as base64 for the connected wallet.
+ *
+ * The server will assemble both partial sigs and submit only when both are collected.
+ */
+export async function partialSignForContra(
+  unsignedTxBase64: string,
+  walletPublicKey: string,
+  signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>
+): Promise<string> {
+  const txBytes = Buffer.from(unsignedTxBase64, 'base64');
+
+  // Atomic swap txs are always VersionedTransaction (v0)
+  const vtx = VersionedTransaction.deserialize(txBytes);
+  const signed = await signTransaction(vtx) as VersionedTransaction;
+
+  // Find which signature slot belongs to this wallet
+  const accountKeys = signed.message.staticAccountKeys;
+  const numSigners = signed.message.header.numRequiredSignatures;
+
+  let signerIndex = -1;
+  for (let i = 0; i < numSigners; i++) {
+    if (accountKeys[i].toBase58() === walletPublicKey) {
+      signerIndex = i;
+      break;
+    }
+  }
+
+  if (signerIndex === -1) {
+    throw new Error('Connected wallet is not a required signer for this transaction');
+  }
+
+  const sigBytes = signed.signatures[signerIndex];
+  if (!sigBytes || sigBytes.every(b => b === 0)) {
+    throw new Error('Wallet did not produce a signature');
+  }
+
+  // Return the 64-byte signature as base64
+  return Buffer.from(sigBytes).toString('base64');
+}
+
 function toBase58(bytes: Uint8Array): string {
   const bs58chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   const digits = [0];
