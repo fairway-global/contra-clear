@@ -12,7 +12,7 @@ RFQ creation, bilateral quote negotiation, escrow funding flow, compliance-orien
 ## For DoraHacks Judges
 
 - Live demo: [Live DevNet Site to test](https://contraclear.fairway.global/)
-- Video demo: `TBD`
+- Video demo: [Live Demo Video](https://www.veed.io/view/1322ccfe-b88c-4911-9748-2b7a8d396e7c?source=Dashboard&panel=share)
 - Technical setup guide: [`docs/SETUP_GUIDE.md`](./docs/SETUP_GUIDE.md)
 
 Fast evaluation path:
