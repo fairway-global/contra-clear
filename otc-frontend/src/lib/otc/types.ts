@@ -89,6 +89,8 @@ export interface RFQ {
   settlementLegBTx?: string | null;
   settlementLegASig?: string | null;
   settlementLegBSig?: string | null;
+  atomicSwapTx?: string | null;
+  atomicSwapSigners?: string[] | null;
 }
 
 export interface Quote {
@@ -215,7 +217,7 @@ export interface PlatformAccessRequest extends PlatformAccessRequestInput {
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   [UserRole.RFQ_ORIGINATOR]: 'RFQ Originator',
-  [UserRole.LIQUIDITY_PROVIDER]: 'Liquidity Provider',
+  [UserRole.LIQUIDITY_PROVIDER]: 'Approved Trader',
   [UserRole.ADMIN]: 'Admin',
 };
 

@@ -62,7 +62,7 @@ export default function QuotePanel({ rfq, onTradeComplete }: QuotePanelProps) {
     setAccepting(true);
     try {
       await acceptQuote(rfq.id, quote.id);
-      toast.success('Trade settled by OTC desk!');
+      toast.success('Trade settled by host institution desk!');
       setRfqStatus('filled');
       const d = await getRFQ(rfq.id);
       setQuotes(d.quotes || []);

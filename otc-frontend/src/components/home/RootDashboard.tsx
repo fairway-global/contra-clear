@@ -10,18 +10,18 @@ interface RootDashboardProps {
 const workflowSteps = [
   {
     id: '01',
-    title: 'Clients creates RFQ',
-    description: 'Submit a structured request for quote with asset, size, and parameters.',
+    title: 'RFQ creator submits request',
+    description: 'A verified participant submits a structured request with asset, size, and parameters.',
   },
   {
     id: '02',
-    title: 'Liquidity providers submits quote',
-    description: 'The operating bank responds with pricing, terms, and execution parameters.',
+    title: 'Approved trader submits quote',
+    description: 'An approved, licensed trader at a trusted host institution responds with pricing and execution terms.',
   },
   {
     id: '03',
     title: 'Negotiation and discovery',
-    description: 'Private bilateral negotiation between counterparties with full audit trail.',
+    description: 'Private bilateral negotiation between participants with full audit trail.',
   },
   {
     id: '04',
@@ -51,11 +51,11 @@ const whyContraItems = [
   },
   {
     title: 'Escrow-backed flows',
-    description: 'Collateral is locked in smart-contract escrow before execution, reducing counterparty default risk.',
+    description: 'Collateral is locked in smart-contract escrow before execution, reducing participant default risk.',
   },
   {
-    title: 'Institutional control',
-    description: 'Banks retain control over counterparty access, pricing policies, settlement parameters, and compliance.',
+    title: 'Operator control',
+    description: 'Trusted host institutions retain control over participant access, pricing policies, settlement parameters, and compliance.',
   },
   {
     title: 'Solana-native liquidity',
@@ -66,7 +66,7 @@ const whyContraItems = [
 const trustItems = [
   {
     title: 'KYB onboarding',
-    description: 'Every counterparty is verified before accessing the platform.',
+    description: 'Every participant is verified before accessing the platform.',
   },
   {
     title: 'Role-gated access',
@@ -81,8 +81,8 @@ const trustItems = [
     description: 'Every quote, negotiation, and settlement is logged with a durable audit trail.',
   },
   {
-    title: 'Bank-operated model',
-    description: 'Banks deploy and operate their own instance with no shared-infrastructure risk.',
+    title: 'Institution-operated model',
+    description: 'Trusted institutions can deploy and operate their own instance with no shared-infrastructure risk.',
   },
 ];
 
@@ -153,7 +153,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
               for institutional markets
             </h1>
             <p className="mx-auto mt-6 max-w-3xl font-mono text-base leading-8 text-terminal-dim">
-              Bank-operated RFQ infrastructure enabling private negotiation, escrow-backed settlement, and atomic execution on Solana.
+              Trusted-institution-operated RFQ infrastructure enabling private negotiation, escrow-backed settlement, and atomic execution on Solana.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <button type="button" className="btn-primary min-w-52" onClick={onReadyToStart}>
@@ -181,7 +181,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
         <SectionHeading
           eyebrow="How It Works"
           title="Negotiate privately. Settle atomically."
-          description="A complete RFQ-to-settlement workflow designed for institutional counterparties."
+          description="A complete RFQ-to-settlement workflow designed for regulated participants."
         />
         <div className="grid gap-4 xl:grid-cols-2">
           {workflowSteps.map((step) => (
@@ -202,33 +202,33 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
         <SectionHeading
           eyebrow="Platform"
           title="Built for both sides of the desk"
-          description="Purpose-built interfaces for banks operating quote desks and institutions seeking private execution."
+          description="Purpose-built interfaces for trusted institutions operating OTC desks and participants seeking private execution."
         />
         <div className="grid gap-4 xl:grid-cols-2">
           <div className="panel p-6">
-            <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">For Banks</div>
-            <h3 className="mt-3 font-mono text-xl text-terminal-text">Operate your own private OTC desk</h3>
+            <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">For Host Institutions</div>
+            <h3 className="mt-3 font-mono text-xl text-terminal-text">Operate your own trusted OTC desk</h3>
             <p className="mt-3 font-mono text-xs leading-6 text-terminal-dim">
-              Full control over counterparty access, pricing, settlement policy, and operational monitoring.
+              Full control over participant access, pricing, settlement policy, and operational monitoring.
             </p>
             <div className="mt-5 space-y-3 font-mono text-xs text-terminal-text">
-              <div>Onboard institutions with KYB</div>
+              <div>Onboard approved traders with KYC/KYB</div>
               <div>Manage quote desk operations</div>
               <div>Monitor escrow and settlement</div>
               <div>Enforce compliance policies</div>
             </div>
           </div>
           <div className="panel p-6">
-            <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">For Institutions</div>
-            <h3 className="mt-3 font-mono text-xl text-terminal-text">Access bank-operated markets privately</h3>
+            <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">For RFQ Creators</div>
+            <h3 className="mt-3 font-mono text-xl text-terminal-text">Access trusted institution-operated markets privately</h3>
             <p className="mt-3 font-mono text-xs leading-6 text-terminal-dim">
               Structured RFQ workflows, direct negotiation, escrow-backed execution, and controlled settlement.
             </p>
             <div className="mt-5 space-y-3 font-mono text-xs text-terminal-text">
               <div>Submit structured RFQs</div>
-              <div>Negotiate directly with banks</div>
+              <div>Negotiate directly with approved traders</div>
               <div>Track escrow and settlement</div>
-              <div>Access private bank-operated markets</div>
+              <div>Access private hosted OTC markets</div>
             </div>
           </div>
         </div>
@@ -259,7 +259,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
         <div className="grid gap-4 xl:grid-cols-3">
           <ShowcasePanel title="Command Center" badge="Live">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-xs text-terminal-text">Bank Command Center</span>
+              <span className="font-mono text-xs text-terminal-text">Host Institution Command Center</span>
               <span className="font-mono text-[10px] uppercase tracking-wider text-terminal-accent">Live</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -339,7 +339,7 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
         <SectionHeading
           eyebrow="Infrastructure"
           title="Enterprise-grade trust architecture"
-          description="Built to meet the compliance, security, and operational requirements of regulated institutions."
+          description="Built to meet the compliance, security, and operational requirements of regulated institutions and trusted OTC operators."
         />
         <div className="space-y-3">
           {trustItems.map((item) => (
@@ -355,8 +355,8 @@ export default function RootDashboard({ currentUser, onReadyToStart, onNavigate 
         <div className="border-b border-terminal-border px-6 py-4">
           <SectionHeading
             eyebrow="Demo"
-            title="Build the next generation of institutional OTC on Contra"
-            description="Join the institutions and banks building private, compliant, and atomic OTC infrastructure on Solana."
+            title="Build the next generation of trusted OTC on Contra"
+            description="Join the teams building private, compliant, and atomic OTC infrastructure on Solana."
           />
         </div>
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-8 sm:flex-row">

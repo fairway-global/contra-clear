@@ -30,11 +30,14 @@ import {
   updateKycAttestation,
   registerSettlementWallet,
   storeSettlementLegs,
+  storeAtomicSwapTx,
   recordSettlementLegSig,
+  completeAtomicSettlement,
 } from '../db/otc-store.js';
 import { broadcast } from '../services/ws.js';
 import { createSASAttestation } from '../services/attestation.js';
-import { buildLegATransaction, buildLegBTransaction } from '../services/swap.js';
+import { buildDepositToOperatorTx, executeOperatorRelease, getOperatorPublicKey } from '../services/swap.js';
+import { ensureChannelATAsForSwap } from '../services/channel-ata.js';
 import { checkTransactionConfirmed, GATEWAY_URL } from '../services/contra.js';
 import type { UserRole } from '../db/otc-store.js';
 
@@ -315,7 +318,15 @@ otcRouter.get('/admin/escrow', (c) => {
   return c.json(otcGetAdminEscrow());
 });
 
-// ── Settlement endpoints ──────────────────────────────────────────────────
+// ── Settlement endpoints (Operator-Escrow) ───────────────────────────────
+//
+// Flow:
+// 1. Each party sends tokens to the OPERATOR (escrow) via signAndSendToContra
+//    (immediate submission, fresh blockhash, no expiry)
+// 2. When both deposits to operator confirmed, operator releases tokens to
+//    the correct recipients server-side (operator signs with its keypair,
+//    fresh blockhash, submitted instantly)
+// 3. Truly atomic release — operator controls both release txs
 
 // Register wallet address for settlement
 otcRouter.post('/settlement/register-wallet', async (c) => {
@@ -324,25 +335,14 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
     registerSettlementWallet(rfqId, userId, walletAddress);
     const rfq = otcGetRFQ(rfqId);
 
-    // If both wallets are now registered and legs not yet built, build them
-    if (rfq.originatorWallet && rfq.providerWallet && !rfq.settlementLegATx) {
-      const trade = {
-        id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
-        partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
-        sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
-        buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
-        price: rfq.acceptedPrice || '0', status: 'pending_signatures' as const,
-        legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
-      };
-
-      try {
-        const legATx = await buildLegATransaction(trade);
-        const legBTx = await buildLegBTransaction(trade);
-        storeSettlementLegs(rfqId, legATx, legBTx);
-        broadcast({ type: 'otc_escrow_submitted', data: otcGetRFQ(rfqId) } as any);
-      } catch (err: any) {
-        console.error('Settlement leg build failed:', err.message);
-      }
+    // Pre-create channel ATAs if both wallets registered (async, don't block)
+    if (rfq.originatorWallet && rfq.providerWallet) {
+      // Need ATAs for: operator receiving both tokens, both parties receiving the other token
+      const operatorPk = getOperatorPublicKey();
+      Promise.all([
+        ensureChannelATAsForSwap(rfq.originatorWallet, rfq.providerWallet, rfq.sellToken, rfq.buyToken),
+        ensureChannelATAsForSwap(operatorPk, operatorPk, rfq.sellToken, rfq.buyToken),
+      ]).catch(err => console.error('ATA pre-creation failed:', err.message));
     }
 
     return c.json({ success: true, rfq: otcGetRFQ(rfqId) });
@@ -351,119 +351,92 @@ otcRouter.post('/settlement/register-wallet', async (c) => {
   }
 });
 
-// Build settlement legs (called by frontend if legs not yet built)
+// Build a tx to deposit this party's tokens to the OPERATOR (escrow).
+// Party signs and submits immediately — no blockhash expiry.
 otcRouter.post('/settlement/build', async (c) => {
   try {
-    const { rfqId } = await c.req.json();
+    const { rfqId, leg } = await c.req.json();
     const rfq = otcGetRFQ(rfqId);
 
-    if (rfq.status !== 'ReadyToSettle') {
+    if (rfq.status !== 'ReadyToSettle' && rfq.status !== 'Settling') {
       return c.json({ error: 'RFQ is not ready for settlement' }, 400);
     }
 
-    if (rfq.settlementLegATx && rfq.settlementLegBTx) {
-      return c.json({ rfqId, legATx: rfq.settlementLegATx, legBTx: rfq.settlementLegBTx });
-    }
-
     if (!rfq.originatorWallet || !rfq.providerWallet) {
-      return c.json({ error: 'Both parties must register their wallet addresses first. Connect your wallet and try again.' }, 400);
+      return c.json({ error: 'Both parties must register their wallet addresses first.' }, 400);
     }
 
-    // Validate Contra channel balances before building settlement
-    const { getChannelBalance } = await import('../services/contra.js');
+    const operatorPk = getOperatorPublicKey();
 
-    const originatorBalance = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
-    const sellAmountRaw = BigInt(rfq.sellAmount);
-    if (!originatorBalance || BigInt(originatorBalance.amount) < sellAmountRaw) {
-      const has = originatorBalance ? originatorBalance.uiAmount : 0;
-      const needs = Number(sellAmountRaw) / 1e6;
-      return c.json({
-        error: `Originator has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.sellToken.slice(0,8)}... Deposit to Contra first.`
-      }, 400);
+    // Ensure operator has channel ATAs for both tokens
+    await ensureChannelATAsForSwap(operatorPk, operatorPk, rfq.sellToken, rfq.buyToken);
+    // Ensure both parties have ATAs for receiving tokens
+    await ensureChannelATAsForSwap(rfq.originatorWallet, rfq.providerWallet, rfq.sellToken, rfq.buyToken);
+
+    // Build: party → operator transfer
+    let txBase64: string;
+    if (leg === 'A') {
+      txBase64 = await buildDepositToOperatorTx(rfq.originatorWallet, rfq.sellToken, rfq.sellAmount);
+    } else {
+      txBase64 = await buildDepositToOperatorTx(rfq.providerWallet, rfq.buyToken, rfq.indicativeBuyAmount);
     }
 
-    const providerBalance = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
-    const buyAmountRaw = BigInt(rfq.indicativeBuyAmount);
-    if (!providerBalance || BigInt(providerBalance.amount) < buyAmountRaw) {
-      const has = providerBalance ? providerBalance.uiAmount : 0;
-      const needs = Number(buyAmountRaw) / 1e6;
-      return c.json({
-        error: `Liquidity provider has insufficient Contra channel balance. Has ${has}, needs ${needs} ${rfq.buyToken.slice(0,8)}... Deposit to Contra first.`
-      }, 400);
-    }
-
-    const trade = {
-      id: rfqId, rfqId, quoteId: rfq.selectedQuoteId || '',
-      partyA: rfq.originatorWallet, partyB: rfq.providerWallet,
-      sellToken: rfq.sellToken, sellAmount: rfq.sellAmount,
-      buyToken: rfq.buyToken, buyAmount: rfq.indicativeBuyAmount,
-      price: rfq.acceptedPrice || '0', status: 'pending_signatures' as const,
-      legASig: null, legBSig: null, createdAt: rfq.createdAt, completedAt: null,
-    };
-
-    const legATx = await buildLegATransaction(trade);
-    const legBTx = await buildLegBTransaction(trade);
-    storeSettlementLegs(rfqId, legATx, legBTx);
-
-    return c.json({ rfqId, legATx, legBTx });
+    return c.json({ rfqId, legTx: txBase64, leg });
   } catch (err: any) {
     console.error('Settlement build failed:', err.message);
     return c.json({ error: err.message }, 500);
   }
 });
 
-// Get settlement info for an RFQ
+// Get settlement info
 otcRouter.get('/settlement/:rfqId', (c) => {
   try {
     const rfq = otcGetRFQ(c.req.param('rfqId'));
     return c.json({
-      rfqId: rfq.id,
-      status: rfq.status,
-      legATx: rfq.settlementLegATx,
-      legBTx: rfq.settlementLegBTx,
-      legASig: rfq.settlementLegASig,
-      legBSig: rfq.settlementLegBSig,
-      originatorId: rfq.originatorId,
-      providerId: rfq.selectedProviderId,
+      rfqId: rfq.id, status: rfq.status,
+      legASig: rfq.settlementLegASig, legBSig: rfq.settlementLegBSig,
+      originatorId: rfq.originatorId, providerId: rfq.selectedProviderId,
     });
   } catch (err: any) {
     return c.json({ error: err.message }, 404);
   }
 });
 
-// Submit a signed settlement leg
+// Record that a party deposited their tokens to the operator.
+// When both deposits confirmed → operator releases tokens to both parties.
 otcRouter.post('/settlement/submit-leg', async (c) => {
   try {
     const { rfqId, leg, signature } = await c.req.json();
-    const rfq = otcGetRFQ(rfqId);
-
-    // Re-validate Contra balances before recording settlement
-    const { getChannelBalance } = await import('../services/contra.js');
-    if (leg === 'A' && rfq.originatorWallet) {
-      const bal = await getChannelBalance(rfq.originatorWallet, rfq.sellToken);
-      if (!bal || BigInt(bal.amount) < BigInt(rfq.sellAmount)) {
-        return c.json({ error: `Originator has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
-      }
-    }
-    if (leg === 'B' && rfq.providerWallet) {
-      const bal = await getChannelBalance(rfq.providerWallet, rfq.buyToken);
-      if (!bal || BigInt(bal.amount) < BigInt(rfq.indicativeBuyAmount)) {
-        return c.json({ error: `Provider has insufficient Contra balance (${bal?.uiAmount ?? 0}). Deposit first.` }, 400);
-      }
-    }
-
     if (!rfqId || !leg || !signature) {
       return c.json({ error: 'rfqId, leg (A/B), and signature are required' }, 400);
     }
 
-    console.log(`Settlement leg ${leg} submitted for RFQ ${rfqId}: ${signature}`);
+    console.log(`Settlement leg ${leg} deposited to operator for RFQ ${rfqId}: ${signature}`);
 
     const updatedRfq = recordSettlementLegSig(rfqId, leg, signature);
     broadcast({ type: 'otc_escrow_submitted', data: updatedRfq } as any);
 
-    return c.json({ success: true, rfq: updatedRfq });
+    // Both parties deposited → operator releases tokens to both
+    if (updatedRfq.settlementLegASig && updatedRfq.settlementLegBSig) {
+      console.log(`Both parties escrowed for RFQ ${rfqId}. Operator releasing tokens...`);
+
+      const rfq = otcGetRFQ(rfqId);
+      const { releaseSigA, releaseSigB } = await executeOperatorRelease(
+        rfq.originatorWallet!, rfq.providerWallet!,
+        rfq.sellToken, rfq.sellAmount,
+        rfq.buyToken, rfq.indicativeBuyAmount,
+      );
+
+      console.log(`Operator released: A=${releaseSigA}, B=${releaseSigB}`);
+
+      const settledRfq = completeAtomicSettlement(rfqId, `${releaseSigA}|${releaseSigB}`);
+      broadcast({ type: 'trade_completed', data: settledRfq } as any);
+      return c.json({ success: true, settled: true, rfq: settledRfq });
+    }
+
+    return c.json({ success: true, settled: false, rfq: updatedRfq });
   } catch (err: any) {
-    console.error('Settlement leg submission failed:', err.message);
+    console.error('Settlement failed:', err.message);
     return c.json({ error: err.message }, 500);
   }
 });

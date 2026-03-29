@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import toast from 'react-hot-toast';
 import Panel from '../layout/Panel';
@@ -14,7 +14,7 @@ import EscrowStatusCard from './escrow/EscrowStatusCard';
 import EscrowTimeline from './escrow/EscrowTimeline';
 import { formatRawAmount, getTokenSymbol, timeAgo, toRawAmount } from '../../lib/constants';
 import TokenIcon from '../ui/TokenIcon';
-import { signAndSendToContra } from '../../lib/sendToContra';
+import { signAndSendToContra, partialSignForContra } from '../../lib/sendToContra';
 import {
   acceptQuote,
   counterQuote,
@@ -28,7 +28,7 @@ import {
   submitEscrowTxHash,
   submitQuote,
   registerSettlementWallet,
-  buildSettlementLegs,
+  buildSettlementLeg,
   getSettlementInfo,
   submitSettlementLeg,
 } from '../../lib/otc/api';
@@ -172,7 +172,8 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     void refreshList();
   }, [refreshList]);
 
-  // Auto-register wallet when viewing a ReadyToSettle RFQ
+  // Auto-register wallet when viewing a ReadyToSettle RFQ (once per RFQ+wallet combo)
+  const walletRegKey = useRef<string>('');
   useEffect(() => {
     if (!selectedRFQ || !currentUser || !publicKey) return;
     if (selectedRFQ.status !== RFQStatus.ReadyToSettle) return;
@@ -181,7 +182,10 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     const alreadyRegistered = isOrig ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet;
     if (alreadyRegistered) return;
 
-    // Register wallet silently in the background
+    const key = `${selectedRFQ.id}:${publicKey.toString()}`;
+    if (walletRegKey.current === key) return;
+    walletRegKey.current = key;
+
     registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString())
       .then(() => refreshDetail(selectedRFQ.id))
       .catch(() => {});
@@ -398,16 +402,16 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
       const isOriginator = currentUser.id === selectedRFQ.originatorId;
       const myLeg: 'A' | 'B' = isOriginator ? 'A' : 'B';
 
-      // Ensure wallet is registered (may already be from auto-register)
+      // Ensure wallet is registered
       if (!(isOriginator ? selectedRFQ.originatorWallet : selectedRFQ.providerWallet)) {
         await registerSettlementWallet(selectedRFQ.id, currentUser.id, publicKey.toString());
       }
 
-      // Build legs if not already built
+      // Build a fresh single-signer tx for MY leg
       toast.loading('Preparing settlement...', { id: 'settlement' });
-      let settlement: { legATx: string; legBTx: string };
+      let build: { legTx: string };
       try {
-        settlement = await buildSettlementLegs(selectedRFQ.id);
+        build = await buildSettlementLeg(selectedRFQ.id, myLeg);
       } catch (err: any) {
         if (err.message?.includes('Both parties must register')) {
           toast.error('Counterparty has not opened this RFQ yet. Ask them to view it first.', { id: 'settlement' });
@@ -416,20 +420,24 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
         throw err;
       }
 
-      const myLegTx = isOriginator ? settlement.legATx : settlement.legBTx;
-      if (!myLegTx) {
-        toast.error('No settlement transaction for your role', { id: 'settlement' });
+      if (!build.legTx) {
+        toast.error('No settlement transaction available', { id: 'settlement' });
         return;
       }
 
-      // Sign and send to Contra channel
-      toast.loading('Sign the swap transaction in your wallet...', { id: 'settlement' });
-      const signature = await signAndSendToContra(myLegTx, signTransaction);
+      // Sign AND submit to Contra immediately (fresh blockhash, no expiry)
+      toast.loading('Sign the settlement in your wallet...', { id: 'settlement' });
+      const txSignature = await signAndSendToContra(build.legTx, signTransaction);
 
-      // Record the confirmed leg
-      toast.loading('Recording settlement...', { id: 'settlement' });
-      await submitSettlementLeg(selectedRFQ.id, myLeg, signature);
-      toast.success('Settlement leg signed! Tokens swapped on Contra channel.', { id: 'settlement' });
+      // Record the confirmed tx signature on the backend
+      toast.loading('Recording...', { id: 'settlement' });
+      const result = await submitSettlementLeg(selectedRFQ.id, myLeg, txSignature);
+
+      if (result.settled) {
+        toast.success('Settlement complete! Tokens swapped on Contra channel.', { id: 'settlement' });
+      } else {
+        toast.success('Your leg is done. Waiting for counterparty.', { id: 'settlement' });
+      }
 
       await refreshList();
       await refreshDetail(selectedRFQ.id);
@@ -461,7 +469,7 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
     return (
       <Panel title="OTC Access">
         <div className="py-12 text-center font-mono text-sm text-terminal-dim">
-          Sign in as an RFQ Originator or Liquidity Provider to access the OTC workflow.
+          Sign in as an RFQ Originator or Approved Trader to access the OTC workflow.
         </div>
       </Panel>
     );
@@ -572,7 +580,7 @@ export default function OTCWorkspace({ route, rfqId, currentUser, role, onNaviga
                   if (alreadySigned) {
                     return (
                       <span className="px-4 py-2 font-mono text-xs text-terminal-green border border-terminal-green/30 rounded">
-                        Your leg signed — waiting for counterparty
+                        Signed — waiting for counterparty to complete atomic swap
                       </span>
                     );
                   }

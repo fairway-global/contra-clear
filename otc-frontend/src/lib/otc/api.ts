@@ -215,23 +215,28 @@ export async function registerSettlementWallet(rfqId: string, userId: string, wa
   });
 }
 
-export async function buildSettlementLegs(rfqId: string): Promise<{ rfqId: string; legATx: string; legBTx: string }> {
+export async function buildSettlementLeg(rfqId: string, leg: 'A' | 'B'): Promise<{
+  rfqId: string;
+  legTx: string;
+  leg: string;
+}> {
   return otcFetch('/settlement/build', {
     method: 'POST',
-    body: JSON.stringify({ rfqId }),
+    body: JSON.stringify({ rfqId, leg }),
   });
 }
 
 export async function getSettlementInfo(rfqId: string): Promise<{
   rfqId: string; status: string;
-  legATx: string | null; legBTx: string | null;
+  atomicSwapTx: string | null;
+  signers: string[] | null;
   legASig: string | null; legBSig: string | null;
   originatorId: string; providerId: string | null;
 }> {
   return otcFetch(`/settlement/${rfqId}`);
 }
 
-export async function submitSettlementLeg(rfqId: string, leg: 'A' | 'B', signature: string): Promise<{ success: boolean }> {
+export async function submitSettlementLeg(rfqId: string, leg: 'A' | 'B', signature: string): Promise<{ success: boolean; settled: boolean; txSignature?: string }> {
   return otcFetch('/settlement/submit-leg', {
     method: 'POST',
     body: JSON.stringify({ rfqId, leg, signature }),

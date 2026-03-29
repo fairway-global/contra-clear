@@ -33,13 +33,13 @@ export default function LoginPage({
             <div className="rounded border border-terminal-border bg-terminal-bg p-4">
               <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">Backend-Assigned Roles</div>
               <div className="mt-3 font-mono text-xs leading-6 text-terminal-dim">
-                RFQ Originator, Liquidity Provider, and Admin access are inferred from your approved account record after sign in.
+                RFQ Originator, Approved Trader, and Admin access are inferred from your approved account record after sign in.
               </div>
             </div>
             <div className="rounded border border-terminal-border bg-terminal-bg p-4">
-              <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">Institutional Access</div>
+              <div className="font-mono text-xs uppercase tracking-[0.3em] text-terminal-accent">Participant Access</div>
               <div className="mt-3 font-mono text-xs leading-6 text-terminal-dim">
-                If you do not yet have an account, submit an institutional signup request and complete KYB before activation.
+                If you do not yet have an account, submit an access request and complete KYC/KYB before activation.
               </div>
             </div>
           </div>
@@ -68,7 +68,7 @@ export default function LoginPage({
               className="input-field"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="name@institution.com"
+              placeholder="name@organization.com"
               autoComplete="email"
             />
           </div>
@@ -96,7 +96,7 @@ export default function LoginPage({
 
           <div className="rounded border border-terminal-border bg-terminal-bg p-4 font-mono text-xs leading-6 text-terminal-dim">
             No account yet?
-            <div className="mt-2">Submit your access request and complete KYC/KYB onboarding.</div>
+            <div className="mt-2">Submit your access request and continue through compliance onboarding.</div>
             <button type="button" className="btn-secondary mt-4" onClick={onNavigateSignup}>
               Sign Up
             </button>

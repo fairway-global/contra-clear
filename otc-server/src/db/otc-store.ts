@@ -73,6 +73,8 @@ export interface OtcRFQ {
   settlementLegBTx: string | null;
   settlementLegASig: string | null;
   settlementLegBSig: string | null;
+  atomicSwapTx: string | null;
+  atomicSwapSigners: string[] | null;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
@@ -223,6 +225,8 @@ export function initOtcSchema(): void {
       settlement_leg_b_tx TEXT,
       settlement_leg_a_sig TEXT,
       settlement_leg_b_sig TEXT,
+      atomic_swap_tx TEXT,
+      atomic_swap_signers TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at TEXT NOT NULL
@@ -374,6 +378,8 @@ function mapRFQ(row: any): OtcRFQ {
     settlementLegBTx: row.settlement_leg_b_tx ?? null,
     settlementLegASig: row.settlement_leg_a_sig ?? null,
     settlementLegBSig: row.settlement_leg_b_sig ?? null,
+    atomicSwapTx: row.atomic_swap_tx ?? null,
+    atomicSwapSigners: row.atomic_swap_signers ? JSON.parse(row.atomic_swap_signers) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,
@@ -902,47 +908,67 @@ export function storeSettlementLegs(rfqId: string, legATx: string, legBTx: strin
   ).run(legATx, legBTx, now(), rfqId);
 }
 
+export function storeAtomicSwapTx(rfqId: string, atomicTx: string, signers: string[]): void {
+  const d = getDb();
+  d.prepare(
+    `UPDATE otc_rfqs SET atomic_swap_tx = ?, atomic_swap_signers = ?, updated_at = ? WHERE id = ?`
+  ).run(atomicTx, JSON.stringify(signers), now(), rfqId);
+}
+
+/**
+ * Record a partial signature for the atomic swap.
+ * leg 'A' = originator's signature, leg 'B' = provider's signature.
+ * Does NOT submit to Contra — returns whether both sigs are now present.
+ */
 export function recordSettlementLegSig(rfqId: string, leg: 'A' | 'B', signature: string): OtcRFQ {
   const d = getDb();
   const ts = now();
   const col = leg === 'A' ? 'settlement_leg_a_sig' : 'settlement_leg_b_sig';
   d.prepare(`UPDATE otc_rfqs SET ${col} = ?, updated_at = ? WHERE id = ?`).run(signature, ts, rfqId);
+  return otcGetRFQ(rfqId);
+}
 
-  // Check if both legs are now signed → complete settlement
+/**
+ * Mark the atomic swap as settled after successful on-chain execution.
+ * Called by the route handler after submitAtomicSwap succeeds.
+ */
+export function completeAtomicSettlement(rfqId: string, txSignature: string): OtcRFQ {
+  const d = getDb();
+  const ts = now();
   const rfq = d.prepare('SELECT * FROM otc_rfqs WHERE id = ?').get(rfqId) as any;
-  if (rfq.settlement_leg_a_sig && rfq.settlement_leg_b_sig) {
-    const txn = d.transaction(() => {
-      d.prepare("UPDATE otc_rfqs SET status = 'Settling', updated_at = ? WHERE id = ?").run(ts, rfqId);
-      insertActivity(d, rfqId, 'SETTLEMENT_STARTED', '', 'System',
-        'Both settlement legs signed. Executing swap on Contra channel.');
+  if (!rfq) throw new Error('RFQ not found');
 
-      // Release escrows
-      d.prepare("UPDATE otc_escrows SET status = 'Released', updated_at = ? WHERE rfq_id = ?").run(ts, rfqId);
+  const txn = d.transaction(() => {
+    d.prepare("UPDATE otc_rfqs SET status = 'Settling', updated_at = ? WHERE id = ?").run(ts, rfqId);
+    insertActivity(d, rfqId, 'SETTLEMENT_STARTED', '', 'System',
+      `Both parties signed. Atomic swap submitted to Contra channel. TX: ${txSignature}`);
 
-      // Update filled amount
-      const currentFilled = BigInt(rfq.filled_amount || '0');
-      const originatorEscrow = d.prepare("SELECT * FROM otc_escrows WHERE rfq_id = ? AND party_role = 'RFQ_ORIGINATOR'").get(rfqId) as any;
-      const fillIncrement = BigInt(originatorEscrow?.amount || rfq.sell_amount);
-      const newFilled = currentFilled + fillIncrement;
-      const totalSell = BigInt(rfq.sell_amount);
+    // Release escrows
+    d.prepare("UPDATE otc_escrows SET status = 'Released', updated_at = ? WHERE rfq_id = ?").run(ts, rfqId);
 
-      if (newFilled >= totalSell) {
-        d.prepare("UPDATE otc_rfqs SET status = 'Settled', filled_amount = ?, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
-      } else {
-        d.prepare("UPDATE otc_rfqs SET status = 'OpenForQuotes', filled_amount = ?, selected_quote_id = NULL, selected_provider_id = NULL, selected_provider_name = NULL, accepted_price = NULL, settlement_leg_a_tx = NULL, settlement_leg_b_tx = NULL, settlement_leg_a_sig = NULL, settlement_leg_b_sig = NULL, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
-      }
+    // Update filled amount
+    const currentFilled = BigInt(rfq.filled_amount || '0');
+    const originatorEscrow = d.prepare("SELECT * FROM otc_escrows WHERE rfq_id = ? AND party_role = 'RFQ_ORIGINATOR'").get(rfqId) as any;
+    const fillIncrement = BigInt(originatorEscrow?.amount || rfq.sell_amount);
+    const newFilled = currentFilled + fillIncrement;
+    const totalSell = BigInt(rfq.sell_amount);
 
-      if (rfq.selected_quote_id) {
-        d.prepare("UPDATE otc_quotes SET status = 'Settled', updated_at = ? WHERE id = ?").run(ts, rfq.selected_quote_id);
-      }
+    if (newFilled >= totalSell) {
+      d.prepare("UPDATE otc_rfqs SET status = 'Settled', filled_amount = ?, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
+    } else {
+      d.prepare("UPDATE otc_rfqs SET status = 'OpenForQuotes', filled_amount = ?, selected_quote_id = NULL, selected_provider_id = NULL, selected_provider_name = NULL, accepted_price = NULL, settlement_leg_a_tx = NULL, settlement_leg_b_tx = NULL, settlement_leg_a_sig = NULL, settlement_leg_b_sig = NULL, atomic_swap_tx = NULL, atomic_swap_signers = NULL, updated_at = ? WHERE id = ?").run(newFilled.toString(), ts, rfqId);
+    }
 
-      insertActivity(d, rfqId, 'SETTLEMENT_COMPLETED', '', 'System',
-        newFilled >= totalSell
-          ? 'Settlement completed. Funds swapped on Contra channel.'
-          : `Partial settlement completed. RFQ reopened for remaining amount.`);
-    });
-    txn();
-  }
+    if (rfq.selected_quote_id) {
+      d.prepare("UPDATE otc_quotes SET status = 'Settled', updated_at = ? WHERE id = ?").run(ts, rfq.selected_quote_id);
+    }
+
+    insertActivity(d, rfqId, 'SETTLEMENT_COMPLETED', '', 'System',
+      newFilled >= totalSell
+        ? `Settlement completed. Atomic swap confirmed on Contra channel. TX: ${txSignature}`
+        : `Partial settlement completed. RFQ reopened for remaining amount.`);
+  });
+  txn();
 
   return otcGetRFQ(rfqId);
 }
