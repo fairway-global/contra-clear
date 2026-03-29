@@ -66,7 +66,7 @@ export default function Header({
             <img
               src="/contra-clear-logo.png"
               alt="Contra Clear logo"
-              className="h-5 w-5 object-contain"
+              className="h-[2.2rem] w-auto object-cover"
             />
             <span className="font-mono text-sm font-bold tracking-wider text-terminal-accent">
               CONTRA CLEAR
