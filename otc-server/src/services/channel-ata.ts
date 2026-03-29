@@ -24,10 +24,13 @@ import { getChannelBalance, VALIDATOR_URL } from './contra.js';
 // ── Load operator + faucet keypairs ──────────────────────────────────────
 
 function loadOperatorKeypair(): Keypair {
+  const envSecret = process.env.FAUCET_MINT_AUTHORITY_SECRET || process.env.SAS_SIGNER_SECRET;
+  if (envSecret) {
+    return Keypair.fromSecretKey(new Uint8Array(JSON.parse(envSecret)));
+  }
   const keyPath = (process.env.SAS_PAYER_PATH || '~/.config/solana/id.json')
     .replace('~', process.env.HOME || '');
-  const raw = JSON.parse(readFileSync(keyPath, 'utf-8'));
-  return Keypair.fromSecretKey(new Uint8Array(raw));
+  return Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keyPath, 'utf-8'))));
 }
 
 function loadFaucetAuthority(): Keypair {

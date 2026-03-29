@@ -12,10 +12,15 @@ import nacl from 'tweetnacl';
 let _operatorKeypair: Keypair | null = null;
 function getOperatorKeypair(): Keypair {
   if (!_operatorKeypair) {
-    const keyPath = (process.env.SAS_PAYER_PATH || '~/.config/solana/id.json')
-      .replace('~', process.env.HOME || '');
-    const raw = JSON.parse(readFileSync(keyPath, 'utf-8'));
-    _operatorKeypair = Keypair.fromSecretKey(new Uint8Array(raw));
+    // Prefer env var (no file needed), fall back to file
+    const envSecret = process.env.FAUCET_MINT_AUTHORITY_SECRET || process.env.SAS_SIGNER_SECRET;
+    if (envSecret) {
+      _operatorKeypair = Keypair.fromSecretKey(new Uint8Array(JSON.parse(envSecret)));
+    } else {
+      const keyPath = (process.env.SAS_PAYER_PATH || '~/.config/solana/id.json')
+        .replace('~', process.env.HOME || '');
+      _operatorKeypair = Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(keyPath, 'utf-8'))));
+    }
   }
   return _operatorKeypair;
 }
