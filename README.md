@@ -1,91 +1,158 @@
-# ContraClear OTC
+<p align="center">
+  <img src="./otc-frontend/public/contra-clear-logo.png" alt="Contra Clear logo" width="180" />
+</p>
 
-Institutional crypto OTC desks today settle trades through manual wire transfers, custodian-mediated movements, or trust-based arrangements that introduce counterparty risk, settlement delays, and operational overhead. A buyer can send payment and never receive tokens, or a seller can deliver tokens and never get paid. Settling directly on a public blockchain like Solana solves the trust problem but introduces a new one. Every trade is visible on-chain, exposing order sizes, counterparties, and strategy to the entire market. ContraClear solves both by using the Contra payment channel: an off-chain settlement layer where trades execute with instant finality and full privacy, while assets remain secured by Solana's on-chain escrow. The result is the entire OTC lifecycle: RFQ negotiation, KYC attestation, and escrow-locked settlement in one platform where neither party can default because the operator only releases funds when both sides have committed, and no trade details ever hit the public ledger.
+# Contra Clear OTC
 
-## Stack
+Private, role-based OTC RFQ infrastructure on Solana + Contra.
 
-React 19 + Vite | Hono.js + SQLite | Solana devnet | Contra channel | Supabase Auth | Zyphe KYC/KYB | SAS attestation
+This project was built for hackathon demonstration and focuses on a full OTC workflow:
+RFQ creation, bilateral quote negotiation, escrow funding flow, compliance-oriented onboarding, and operator monitoring.
 
-## Services
+## For DoraHacks Judges
 
-| Port | Service | Description |
-|------|---------|-------------|
-| 5173 | `otc-frontend` | React SPA (Vite) |
-| 3001 | `otc-server` | Backend API (Hono.js + SQLite) |
-| 3002 | WebSocket | Real-time push events |
-| 8085 | `webhook` | Zyphe KYC/KYB webhook receiver |
-| 8899 | Contra Gateway | Channel RPC (GCP: `35.228.38.233:8899`) |
-| 18899 | Solana Validator | Local devnet with escrow programs |
+- Live demo: `TBD`
+- Video demo: `TBD`
+- Technical setup guide: [`docs/SETUP_GUIDE.md`](./docs/SETUP_GUIDE.md)
 
-## On-Chain Addresses
+Fast evaluation path:
+1. Watch the video demo.
+2. Walk through the live app flow (originator, provider, admin).
+3. Use the setup guide only if you want to run the stack locally.
 
-| Key | Address |
-|-----|---------|
-| Escrow Program | `GokvZqD2yP696rzNBNbQvcZ4VsLW7jNvFXU1kW9m7k83` |
-| Withdraw Program | `J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi` |
-| Escrow Instance | `Ds5BLM4jsC2XXXE8fW1pZBmRFz7ekuZ5UKoTPykjRMnq` |
-| SAS Program | `22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG` |
-| SAS Credential PDA | `5K8c9yZqJv65Z4B5Q9BSPQERtRXkRj1NbzKqHZHf2Unm` |
-| Operator | `DrMxF9H3vLv8ZWUp8iS1629oTBHnYF6bsUpB42KXaUdi` |
+## What We Built
 
-## Quick Start
+- Institutional OTC workspace with role separation:
+  - `RFQ_ORIGINATOR`
+  - `LIQUIDITY_PROVIDER`
+  - `ADMIN`
+- Private RFQ lifecycle:
+  - Create RFQ -> submit quote -> counter -> accept/reject
+- Bilateral escrow workflow:
+  - Both sides submit escrow references and move through settlement states
+- Wallet funding rails:
+  - Deposit and withdrawal transaction builders
+- KYC + DID + attestation pipeline:
+  - Zyphe verification webhook -> DID record -> SAS attestation (when configured)
+- Admin console:
+  - RFQ activity, users, escrow state, and settlement queue views
+- Real-time feed:
+  - WebSocket broadcasts for RFQ/quote/escrow/deposit events
 
-```bash
-# Terminal 1: Backend
-cd otc-server && npx tsx src/index.ts
+## Personas And Roles
 
-# Terminal 2: Frontend
-cd otc-frontend && npm run dev
+### 1) RFQ Creator
 
-# Terminal 3: Webhook (for KYC)
-cd webhook && npx tsx src/server.ts
+- Connects wallet
+- Proves verified participant status
+- Creates RFQs and negotiates quotes
+- Accepts terms and submits escrow funding reference
+- Receives settlement asset when flow completes
+
+### 2) Quote Provider
+
+- Connects wallet
+- Proves verified participant status
+- Views eligible RFQs
+- Submits and negotiates quotes
+- If selected, submits escrow funding reference
+- Receives settlement asset when flow completes
+
+### 3) Admin / Desk Host
+
+- Manages users, RFQs, escrow, settlements, and activity views
+- Operates desk-level workflow controls
+- Oversees participant access and operational state
+
+### 4) KYC/KYB Provider
+
+- Verifies individuals/institutions (Zyphe integration path)
+- Produces verification outcome consumed by OTC backend
+- Supports onboarding eligibility decisions
+
+### 5) Compliance / Verification Layer
+
+- Validates KYC/KYB status and role-based access
+- Supports jurisdiction/tier-aware eligibility patterns
+- Enforces access gating across OTC routes
+
+### 6) Contra / Solana Execution Layer
+
+- Supports deposit and withdrawal transaction flow
+- Supports escrow-related transaction submission flow
+- Provides RPC-backed state used by OTC services
+
+### 7) Compliance / Operations Team
+
+- Monitors RFQ lifecycle, escrow states, settlement progress, and audit events
+- Uses admin views for workflow oversight and reporting
+
+## End-To-End Flow
+
+1. Participant onboarding
+   - User completes KYC/KYB, receives verified status, and becomes eligible for OTC access.
+2. RFQ creation
+   - RFQ creator connects wallet, passes access checks, and publishes RFQ terms.
+3. Quote response
+   - Eligible quote providers submit quotes and negotiate in-platform.
+4. Quote acceptance
+   - RFQ creator accepts one quote and locks commercial terms.
+5. Full escrow
+   - Both parties submit escrow funding transactions/references.
+6. Compliance and readiness checks
+   - Eligibility, funding, and workflow readiness checks are enforced before final settlement state transition.
+7. Settlement
+   - Assets move to counterparties according to accepted terms and escrow state.
+8. Completion and records
+   - Trade is finalized with activity trail for operations and compliance monitoring.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  A["React Frontend (Vite)"] -->|"REST (/api/*)"| B["OTC API (Hono, Node)"]
+  A -->|"WebSocket"| C["Realtime WS Server"]
+  B --> D[("SQLite")]
+  B -->|"RPC"| E["Contra Gateway"]
+  B -->|"RPC"| F["Solana Validator / Devnet"]
+  A -->|"Auth"| G["Supabase"]
+  H["KYC Webhook Service (Express)"] -->|"Forward webhook"| B
 ```
 
+## Hackathon Scope Notes
 
+This repository mixes production-style flows with prototype shortcuts. Current behavior:
 
-## Demo Accounts
+- Deposits and withdrawals are real transaction flows against Solana/Contra RPC endpoints.
+- OTC quote and settlement orchestration is tracked in application state (SQLite).
+- In the RFQ route, accepted trades are marked desk-settled (`otc-desk-settled`) for demo speed.
+- Some “full on-chain” workflow expectations (for example, RFQ/quote storage and fully atomic settlement orchestration) are represented in the app-layer prototype model in this repo.
+- Full infra bootstrapping for local Contra includes external dependencies and assets not committed here (see setup guide).
 
-All use password `contra123`:
+## Repository Layout
 
-| Email | Role |
-|-------|------|
-| `rfq@contraotc.dev` | RFQ Originator (KYC bypassed) |
-| `lp@contraotc.dev` | Liquidity Provider (KYC bypassed) |
-| `admin@contraotc.dev` | Admin |
+- `otc-frontend/` - React + TypeScript UI for traders and admins
+- `otc-server/` - Hono API, RFQ logic, escrow workflow, local DB
+- `webhook/` - Zyphe webhook receiver and forwarder service
+- `scripts/setup-demo.sh` - Local token/keypair bootstrap helper
+- `RUN.txt` - Full low-level runbook used during development
 
-## Trading Flow
+## Tech Stack
 
-1. **RFQ** — Originator creates an RFQ (sell token, amount, buy token)
-2. **Quote** — LP submits a quote with price. Counter-quotes supported.
-3. **Accept** — Originator accepts a quote. Both parties deposit escrow tokens on-chain into the Contra channel.
-4. **Settlement** — Each party signs a transfer of their tokens to the operator. When both have signed, the operator releases tokens to the correct recipients server-side. This is atomic — tokens are held by the operator until both parties commit.
+- Frontend: React 19, TypeScript, Vite, Tailwind, Solana Wallet Adapter
+- API: Hono, Node.js, TypeScript
+- Storage: SQLite (`better-sqlite3`)
+- Chains/RPC: Solana Web3, Contra gateway
+- Auth: Supabase
+- Compliance/KYC integrations: Zyphe + SAS libraries
+- Realtime: `ws`
 
-## Settlement (Operator-Escrow)
+## Run Locally
 
-The Contra channel has ~20s blockhash validity, making multi-signer transactions impractical. Instead, the operator acts as escrow:
+For a clean and complete local setup (including optional KYC path), follow:
 
-1. Party A clicks "Sign Settlement" → builds fresh tx (A → operator) → wallet signs → submitted instantly to Contra
-2. Party B clicks "Sign Settlement" (any time later) → same flow (B → operator)
-3. Backend detects both deposits → operator signs and submits two release txs server-side with fresh blockhashes:
-   - Operator → B (sell token)
-   - Operator → A (buy token)
+- [`docs/SETUP_GUIDE.md`](./docs/SETUP_GUIDE.md)
 
-Channel ATAs for receiving tokens are auto-created by the backend via `channel-ata.ts` (operator deposits 1 raw unit with `recipient` parameter).
+## Status
 
-## Contra Channel
-
-Contra is an off-chain payment channel with instant finality. Users deposit SPL tokens on Solana into the escrow program — tokens appear on the channel. Withdrawals reverse the process.
-
-- Gateway RPC: `http://35.228.38.233:8899` (Solana JSON-RPC compatible)
-- Channel uses `TOKEN_PROGRAM_ID` for ATAs (not Token-2022)
-- All demo tokens are Token-2022 on Solana devnet with 6 decimals
-- `getBalance` and `getTransaction` are not supported on the gateway
-- `getSignatureStatuses` works for verifying tx execution
-
-## KYC/KYB
-
-Zyphe integration (sandbox). Individual users go through KYC, institutions through KYB. On verification, a SAS attestation is created on Solana. Admin users and demo accounts (`rfq@`, `lp@`, `admin@`) bypass KYC.
-
-## Faucet
-
-`/faucet` route in the frontend. Mints up to 1000 of any demo token (USDC, USDT, EURC, PYUSD, USDG, USX, CHF, GBP, JPY, SGD, AED) to any wallet on devnet.
+Hackathon prototype in active development. If you are evaluating this project, prefer the live demo and video first, then use the setup guide for reproducibility.

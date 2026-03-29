@@ -153,7 +153,7 @@ export default function DepositEscrowModal({
               <div>
                 <div className="uppercase tracking-wider text-terminal-dim">Role</div>
                 <div className="mt-1 text-terminal-text">
-                  {obligation.partyRole === 'RFQ_ORIGINATOR' ? 'Originator' : 'Liquidity Provider'}
+                  {obligation.partyRole === 'RFQ_ORIGINATOR' ? 'Originator' : 'Approved Trader'}
                 </div>
               </div>
             </div>

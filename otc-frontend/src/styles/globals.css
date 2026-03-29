@@ -135,3 +135,7 @@
   font-family: 'JetBrains Mono', monospace !important;
   color: #e0e0e0 !important;
 }
+
+.text-terminal-dim {
+  color: rgb(150 150 150 / var(--tw-text-opacity, 1)) !important;
+}

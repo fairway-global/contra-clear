@@ -13,7 +13,7 @@ export default function QuoteNegotiationThread({ events, action }: QuoteNegotiat
     <Panel title="Negotiation Thread" action={action}>
       {events.length === 0 ? (
         <div className="py-8 text-center font-mono text-sm text-terminal-dim">
-          Negotiation history will appear here once counterparties start responding.
+          Negotiation history will appear here once participants start responding.
         </div>
       ) : (
         <div className="space-y-3">

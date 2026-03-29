@@ -63,7 +63,11 @@ export default function Header({
       <div className="flex min-h-14 flex-col gap-3 px-6 py-3 xl:flex-row xl:items-center xl:justify-between xl:py-0">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-6">
           <button type="button" className="flex items-center gap-2 text-left" onClick={() => onNavigate(homePath)}>
-            <div className="h-2 w-2 rounded-full bg-terminal-accent animate-pulse" />
+            <img
+              src="/contra-clear-logo.png"
+              alt="Contra Clear logo"
+              className="h-5 w-5 object-contain"
+            />
             <span className="font-mono text-sm font-bold tracking-wider text-terminal-accent">
               CONTRA CLEAR
             </span>
