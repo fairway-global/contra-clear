@@ -291,6 +291,21 @@ export function initOtcSchema(): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // ── Migrations for existing DBs (safe to re-run — silently skips if column exists) ──
+  const migrations = [
+    'ALTER TABLE otc_rfqs ADD COLUMN originator_wallet TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN provider_wallet TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN settlement_leg_a_tx TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN settlement_leg_b_tx TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN settlement_leg_a_sig TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN settlement_leg_b_sig TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN atomic_swap_tx TEXT',
+    'ALTER TABLE otc_rfqs ADD COLUMN atomic_swap_signers TEXT',
+  ];
+  for (const sql of migrations) {
+    try { d.exec(sql); } catch { /* column already exists */ }
+  }
 }
 
 // ── Supabase user auto-provisioning ───────────────────────────────────────
