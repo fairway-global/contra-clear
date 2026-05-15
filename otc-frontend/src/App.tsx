@@ -6,7 +6,7 @@ import { useAuth } from './hooks/useAuth';
 import { useEmailRoleAuth } from './hooks/useEmailRoleAuth';
 
 import Header from './components/layout/Header';
-import RootDashboard from './components/home/RootDashboard';
+import LandingPage from './components/home/LandingPage';
 import LoginPage from './components/auth/LoginPage';
 import SignupPage from './components/auth/SignupPage';
 import BalanceCard from './components/portfolio/BalanceCard';
@@ -366,11 +366,15 @@ export default function App() {
   let mainContent: ReactNode = null;
 
   if (route.kind === 'root') {
-    mainContent = (
-      <RootDashboard
-        currentUser={currentUser}
-        onReadyToStart={() => navigate('/login')}
-        onNavigate={navigate}
+    return (
+      <LandingPage
+        onLaunchApp={() => {
+          if (currentUser) {
+            navigate(currentUser.role === UserRole.ADMIN ? '/admin/otc' : '/otc/rfqs');
+          } else {
+            navigate('/login');
+          }
+        }}
       />
     );
   } else if (route.kind === 'login') {
