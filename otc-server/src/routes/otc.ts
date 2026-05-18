@@ -201,6 +201,33 @@ otcRouter.delete('/users/:userId', (c) => {
   }
 });
 
+// ── Public read endpoints (no auth) ───────────────────────────────────────
+//
+// Deferred-auth flow: visitors browse open RFQs and detail before signing in.
+// Reads only — no mutating actions and no per-viewer filtering.
+
+otcRouter.get('/public/rfqs', (c) => {
+  const rfqs = otcListRFQs({ role: 'LIQUIDITY_PROVIDER' as UserRole, userId: 'public' });
+  return c.json(rfqs);
+});
+
+otcRouter.get('/public/rfqs/:rfqId', (c) => {
+  try {
+    return c.json(otcGetRFQ(c.req.param('rfqId')));
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+});
+
+otcRouter.get('/public/quotes/:rfqId', (c) => {
+  // Use RFQ_ORIGINATOR role to bypass the LP "only-own-quotes" filter — public viewers see the full quote thread.
+  return c.json(otcGetQuotesForRFQ(c.req.param('rfqId'), { role: 'RFQ_ORIGINATOR' as UserRole, userId: 'public' }));
+});
+
+otcRouter.get('/public/activity/:rfqId', (c) => {
+  return c.json(otcGetNegotiationThread(c.req.param('rfqId')));
+});
+
 // ── RFQ endpoints ─────────────────────────────────────────────────────────
 
 otcRouter.get('/rfqs', (c) => {

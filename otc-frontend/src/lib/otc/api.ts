@@ -22,6 +22,17 @@ import { supabase } from '../supabase';
 const OTC_API_BASE = (import.meta as any).env?.VITE_OTC_API_URL
   || '/api/otc';
 
+// ── Public fetch helper (no auth, for deferred-auth read flows) ───────────
+
+async function otcPublicFetch<T>(path: string): Promise<T> {
+  const res = await fetch(`${OTC_API_BASE}${path}`);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data as T;
+}
+
 // ── Fetch helper (uses Supabase access token) ─────────────────────────────
 
 async function otcFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -135,6 +146,24 @@ export async function deleteUser(userId: string): Promise<void> {
 
 export async function listRFQs(_viewer: ViewerIdentity): Promise<RFQ[]> {
   return otcFetch<RFQ[]>('/rfqs');
+}
+
+// Public (no auth) — read endpoints for the launch/LQ browse flow.
+
+export async function listPublicRFQs(): Promise<RFQ[]> {
+  return otcPublicFetch<RFQ[]>('/public/rfqs');
+}
+
+export async function getPublicRFQ(rfqId: string): Promise<RFQ> {
+  return otcPublicFetch<RFQ>(`/public/rfqs/${rfqId}`);
+}
+
+export async function getPublicQuotesForRFQ(rfqId: string): Promise<Quote[]> {
+  return otcPublicFetch<Quote[]>(`/public/quotes/${rfqId}`);
+}
+
+export async function getPublicNegotiationThread(rfqId: string): Promise<ActivityEvent[]> {
+  return otcPublicFetch<ActivityEvent[]>(`/public/activity/${rfqId}`);
 }
 
 export async function createRFQ(input: CreateRFQInput): Promise<RFQ> {

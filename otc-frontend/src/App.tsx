@@ -16,6 +16,10 @@ import OTCWorkspace from './components/otc/OTCWorkspace';
 import AdminConsole from './components/admin/AdminConsole';
 import KYCVerificationPage from './components/auth/KYCVerificationPage';
 import FaucetPage from './components/faucet/FaucetPage';
+import LaunchHub from './components/launch/LaunchHub';
+import PublicCreateRFQ from './components/launch/PublicCreateRFQ';
+import PublicMarketplace from './components/launch/PublicMarketplace';
+import PublicRFQDetail from './components/launch/PublicRFQDetail';
 import { CONTRA_GATEWAY_URL, SOLANA_VALIDATOR_URL } from './lib/constants';
 import { submitPlatformAccessRequest } from './lib/otc/api';
 import type { PlatformAccessRequestInput, User } from './lib/otc/types';
@@ -25,6 +29,10 @@ type AppRoute =
   | { kind: 'root'; path: '/' }
   | { kind: 'login'; path: '/login' }
   | { kind: 'signup'; path: '/signup' }
+  | { kind: 'launch'; path: '/launch' }
+  | { kind: 'launch-rfq'; path: '/launch/rfq' }
+  | { kind: 'launch-lq'; path: '/launch/lq' }
+  | { kind: 'launch-lq-detail'; path: string; rfqId: string }
   | { kind: 'deposit'; path: '/deposit' }
   | { kind: 'withdraw'; path: '/withdraw' }
   | { kind: 'otc-rfqs'; path: '/otc/rfqs' }
@@ -58,6 +66,19 @@ function parseRoute(pathname: string): AppRoute {
   }
   if (path === '/signup') {
     return { kind: 'signup', path };
+  }
+  if (path === '/launch') {
+    return { kind: 'launch', path };
+  }
+  if (path === '/launch/rfq') {
+    return { kind: 'launch-rfq', path };
+  }
+  if (path === '/launch/lq') {
+    return { kind: 'launch-lq', path };
+  }
+  if (path.startsWith('/launch/lq/')) {
+    const rfqId = path.slice('/launch/lq/'.length);
+    return { kind: 'launch-lq-detail', path: `/launch/lq/${rfqId}`, rfqId };
   }
   if (path === '/deposit') {
     return { kind: 'deposit', path };
@@ -351,8 +372,17 @@ export default function App() {
     return content;
   };
 
-  // Show loading while auth is resolving (prevents "please log in" flash)
-  if (authLoading && route.kind !== 'root' && route.kind !== 'login' && route.kind !== 'signup') {
+  // Show loading while auth is resolving (prevents "please log in" flash).
+  // Public routes (root, login, signup, launch hub, public RFQ flow) must render immediately.
+  const isPublicRoute =
+    route.kind === 'root' ||
+    route.kind === 'login' ||
+    route.kind === 'signup' ||
+    route.kind === 'launch' ||
+    route.kind === 'launch-rfq' ||
+    route.kind === 'launch-lq' ||
+    route.kind === 'launch-lq-detail';
+  if (authLoading && !isPublicRoute) {
     return (
       <div className="min-h-screen bg-terminal-bg flex flex-col">
         <Header activePath={route.path} currentUser={null} onNavigate={navigate} onOpenLogin={() => {}} onLogout={() => {}} />
@@ -372,9 +402,40 @@ export default function App() {
           if (currentUser) {
             navigate(currentUser.role === UserRole.ADMIN ? '/admin/otc' : '/otc/rfqs');
           } else {
-            navigate('/login');
+            navigate('/launch');
           }
         }}
+      />
+    );
+  } else if (route.kind === 'launch') {
+    mainContent = (
+      <LaunchHub
+        onChooseRFQ={() => navigate('/launch/rfq')}
+        onChooseLQ={() => navigate('/launch/lq')}
+      />
+    );
+  } else if (route.kind === 'launch-rfq') {
+    mainContent = (
+      <PublicCreateRFQ
+        currentUser={currentUser as User | null}
+        loginByEmail={loginByEmail}
+        onNavigate={navigate}
+      />
+    );
+  } else if (route.kind === 'launch-lq') {
+    mainContent = (
+      <PublicMarketplace
+        onOpenRFQ={(rfqId) => navigate(`/launch/lq/${rfqId}`)}
+        onBack={() => navigate('/launch')}
+      />
+    );
+  } else if (route.kind === 'launch-lq-detail') {
+    mainContent = (
+      <PublicRFQDetail
+        rfqId={route.rfqId}
+        currentUser={currentUser as User | null}
+        loginByEmail={loginByEmail}
+        onNavigate={navigate}
       />
     );
   } else if (route.kind === 'login') {
